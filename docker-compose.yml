@@ -1,0 +1,9 @@
+version: "3"
+services:
+    eth_finder:
+        build: .
+        volumes:
+            - "./config.json:/app/config.json"
+            - "./logs:/app/logs"
+        ports:
+            - 30303: 30303

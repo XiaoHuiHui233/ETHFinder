@@ -1,0 +1,1 @@
+docker run -itd -m 4G --memory-swap 512M --name eth_finder -p 30303:30303 -v ./config.json:/app/config.json -v ./logs:/app/logs eth_finder:v1
