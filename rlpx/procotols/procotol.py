@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from typing import Coroutine, TypeVar, List, Any, Dict, Type, TYPE_CHECKING
 
-from trio._core._run import NurseryManager
+from trio import Nursery
 
 if TYPE_CHECKING:
     from rlpx.procotols.p2p import P2pProcotol
@@ -76,7 +76,7 @@ class Procotol(metaclass=ABCMeta):
     rel: Dict[Capability, Type["Procotol"]] = {}
 
     def __init__(self, base: P2pProcotol, capability: Capability,
-            offset: int, peer_loop: NurseryManager) -> None:
+            offset: int, peer_loop: Nursery) -> None:
         self.base = base
         self.name = capability.name
         self.version = capability.version
@@ -101,6 +101,6 @@ class Procotol(metaclass=ABCMeta):
 
     @classmethod
     def generate(cls, base: P2pProcotol, capability: Capability,
-            offset: int, peer_loop: NurseryManager) -> "Procotol":
+            offset: int, peer_loop: Nursery) -> "Procotol":
         return cls.rel[capability](base, capability, offset, peer_loop)
     

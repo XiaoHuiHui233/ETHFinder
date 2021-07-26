@@ -8,7 +8,7 @@ import time
 from eth_keys.datatypes import PublicKey
 from eth_utils.exceptions import ValidationError
 import trio
-from trio._core._run import NurseryManager
+from trio import Nursery
 import rlp
 import snappy
 
@@ -113,7 +113,7 @@ class P2pProcotol:
     """
     """
 
-    def __init__(self, sender: Peer, peer_loop: NurseryManager) -> None:
+    def __init__(self, sender: Peer, peer_loop: Nursery) -> None:
         self.sender = sender
         self.rckey = sender.rckey
         self.peer_loop = peer_loop

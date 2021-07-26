@@ -17,8 +17,7 @@ from typing import Coroutine, Dict, List
 
 from lru import LRU
 import trio
-from trio import SocketStream
-from trio._core._run import NurseryManager
+from trio import Nursery, SocketStream
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey, PublicKey
 
@@ -63,7 +62,7 @@ class RLPx:
     """
 
     def __init__(self, private_key: PrivateKey, dpt: DPT,
-            base_loop: NurseryManager) -> None:
+            base_loop: Nursery) -> None:
         self.private_key = private_key
         self.base_loop = base_loop
         self.id = KeyAPI().private_key_to_public_key(private_key)

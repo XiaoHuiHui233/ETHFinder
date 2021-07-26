@@ -4,9 +4,8 @@ from enum import Enum
 
 from eth_keys.datatypes import PrivateKey, PublicKey
 import trio
-from trio import SocketStream, BrokenResourceError, ClosedResourceError, \
-    BusyResourceError
-from trio._core._run import NurseryManager
+from trio import Nursery, SocketStream, BrokenResourceError, \
+    ClosedResourceError, BusyResourceError
 
 import config as opts
 from rlpx.ecies import ECIES, ParseError
@@ -31,7 +30,7 @@ class Peer:
     def __init__(self, id: PublicKey, remote_id: PublicKey,
             socket_stream: SocketStream, private_key: PrivateKey,
             after_connected: Callable[["Peer"], Coroutine],
-            peer_loop: NurseryManager) -> None:
+            peer_loop: Nursery) -> None:
         self.id = id
         self.remote_id = remote_id
         self.socket_stream = socket_stream

@@ -3,6 +3,7 @@ MAX_TICK = -MIN_TICK
 MIN_SQRT_RATIO = 4295128739
 MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342
 
+
 def get_sqrt_ratio_at_tick(tick: int) -> int:
     abs_tick = -tick if tick < 0 else tick
 
@@ -57,79 +58,72 @@ def get_sqrt_ratio_at_tick(tick: int) -> int:
     sqrt_price_X96 = (ratio >> 32) + (0 if ratio % (1 << 32) == 0 else 1)
     return sqrt_price_X96
 
-a = get_sqrt_ratio_at_tick(184200)
-print(a)
-b = a / (2**96)
-print(b)
-print(b * b)
 
 def get_tick_at_sqrt_ratio(sqrt_price_X96: int) -> int:
-        # second inequality must be < because the price can never reach the price at the max tick
-        if sqrt_price_X96 < MIN_SQRT_RATIO or sqrt_price_X96 > MAX_SQRT_RATIO:
-            raise ValueError()
-        ratio = sqrt_price_X96 << 32
+    # second inequality must be < because the price can never reach the price at the max tick
+    if sqrt_price_X96 < MIN_SQRT_RATIO or sqrt_price_X96 > MAX_SQRT_RATIO:
+        raise ValueError()
+    ratio = sqrt_price_X96 << 32
 
-        r = ratio
-        msb = 0
-        f = 1 if r > 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF else 0
-        f = f << 7
-        msb = msb | f
+    r = ratio
+    msb = 0
+    f = 1 if r > 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF else 0
+    f = f << 7
+    msb = msb | f
+    r = r >> f
+    
+    f = 1 if r > 0xFFFFFFFFFFFFFFFF else 0
+    f = f << 6
+    msb = msb | f
+    r = r >> f
+
+    f = 1 if r > 0xFFFFFFFF else 0
+    f = f << 5
+    msb = msb | f
+    r = r >> f
+
+    f = 1 if r > 0xFFFF else 0
+    f = f << 4
+    msb = msb | f
+    r = r >> f
+
+    f = 1 if r > 0xFF else 0
+    f = f << 3
+    msb = msb | f
+    r = r >> f
+
+    f = 1 if r > 0xF else 0
+    f = f << 2
+    msb = msb | f
+    r = r >> f
+
+    f = 1 if r > 0x3 else 0
+    f = f << 1
+    msb = msb | f
+    r = r >> f
+
+    f = 1 if r > 0x1 else 0
+    msb = msb | f
+
+    if (msb >= 128):
+        r = ratio >> (msb - 127)
+    else:
+        r = ratio << (127 - msb)
+
+    log_2 = (msb - 128) << 64
+
+    for temp in range(63, 49, -1):
+        r = r * r >> 127
+        f = r >> 128
+        log_2 = log_2 | (f << temp)
         r = r >> f
         
-        f = 1 if r > 0xFFFFFFFFFFFFFFFF else 0
-        f = f << 6
-        msb = msb | f
-        r = r >> f
+    # 128.128 number
+    log_sqrt10001 = log_2 * 255738958999603826347141
 
-        f = 1 if r > 0xFFFFFFFF else 0
-        f = f << 5
-        msb = msb | f
-        r = r >> f
+    tick_low = (log_sqrt10001 - 3402992956809132418596140100660247210) >> 128
+    tick_hi = (log_sqrt10001 + 291339464771989622907027621153398088495) >> 128
 
-        f = 1 if r > 0xFFFF else 0
-        f = f << 4
-        msb = msb | f
-        r = r >> f
+    tick = tick_low if tick_low == tick_hi else tick_hi if get_sqrt_ratio_at_tick(tick_hi) <= sqrt_price_X96 else tick_low
+    return tick
 
-        f = 1 if r > 0xFF else 0
-        f = f << 3
-        msb = msb | f
-        r = r >> f
-
-        f = 1 if r > 0xF else 0
-        f = f << 2
-        msb = msb | f
-        r = r >> f
-
-        f = 1 if r > 0x3 else 0
-        f = f << 1
-        msb = msb | f
-        r = r >> f
-
-        f = 1 if r > 0x1 else 0
-        msb = msb | f
-
-        if (msb >= 128):
-            r = ratio >> (msb - 127)
-        else:
-            r = ratio << (127 - msb)
-
-        log_2 = (msb - 128) << 64
-
-        for temp in range(63, 49, -1):
-            r = r * r >> 127
-            f = r >> 128
-            log_2 = log_2 | (f << temp)
-            r = r >> f
-        
-        # 128.128 number
-        log_sqrt10001 = log_2 * 255738958999603826347141
-
-        tick_low = (log_sqrt10001 - 3402992956809132418596140100660247210) >> 128
-        tick_hi = (log_sqrt10001 + 291339464771989622907027621153398088495) >> 128
-
-        tick = tick_low if tick_low == tick_hi else tick_hi if get_sqrt_ratio_at_tick(tick_hi) <= sqrt_price_X96 else tick_low
-        return tick
-
-c = get_tick_at_sqrt_ratio(a)
-print(c)

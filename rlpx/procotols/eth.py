@@ -4,7 +4,7 @@ import logging
 from logging import FileHandler, Formatter
 
 import trio
-from trio._core._run import NurseryManager
+from trio import Nursery
 
 from rlpx.procotols.procotol import Capability, Procotol
 from rlpx.procotols.p2p import DISCONNECT_REASONS, P2pProcotol
@@ -123,7 +123,7 @@ class EthProcotol(Procotol):
     """
 
     def __init__(self, base: P2pProcotol, capability: Capability,
-            offset: int, peer_loop: NurseryManager) -> None:
+            offset: int, peer_loop: Nursery) -> None:
         super().__init__(base, capability, offset, peer_loop)
         self.rckey = base.rckey
         self.status: Status = None

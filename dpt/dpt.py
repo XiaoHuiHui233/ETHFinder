@@ -20,7 +20,7 @@ from typing import List, Coroutine, Dict
 from abc import ABCMeta, abstractmethod
 
 import trio
-from trio._core._run import NurseryManager
+from trio import NurseryManager
 from lru import LRU
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey, PublicKey
