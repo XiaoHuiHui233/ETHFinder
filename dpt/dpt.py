@@ -20,7 +20,7 @@ from typing import List, Coroutine, Dict
 from abc import ABCMeta, abstractmethod
 
 import trio
-from trio import NurseryManager
+from trio import Nursery
 from lru import LRU
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey, PublicKey
@@ -28,6 +28,7 @@ from eth_keys.datatypes import PrivateKey, PublicKey
 from dpt.classes import PeerNetworkInfo, PeerInfo
 from dpt.kbucket import KBucket
 from dpt.server import Server, ServerListener
+from dpt.dnsdisc import dns
 import config as opts
 
 DIFF_TIME = 0.2
@@ -83,7 +84,7 @@ class DPT:
     """A class represents distributed peer table."""
 
     def __init__(self, private_key: PrivateKey,
-            base_loop: NurseryManager) -> None:
+            base_loop: Nursery) -> None:
         self.private_key = private_key
         self.base_loop = base_loop
         self.id = KeyAPI().private_key_to_public_key(private_key)
@@ -119,6 +120,9 @@ class DPT:
             while self.refresh_switch:
                 if cnt == 0:
                     refresh_loop.start_soon(self.refresh_alive_check)
+                    dns_peers = dns.get_peers(opts.DNS_NETWORKS)
+                    logger.info(f"Adding {len(dns_peers)} from DNS tree.")
+                    refresh_loop.start_soon(self.add_peers, dns_peers)
                 cnt += 1
                 cnt %= 6
                 await trio.sleep(opts.REFRESH_INTERVAL)

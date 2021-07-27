@@ -7,10 +7,12 @@ from trickmath.base import mul_div
 
 a = get_sqrt_ratio_at_tick(184200)
 print(a)
-b = a / (2**96)
-print(b)
-print(b * b)
+magic_number = (10 ** 12) * (2 ** 192)
+print(magic_number / (a * a))
 
+a = get_sqrt_ratio_at_tick(207240)
+print(a)
+print(magic_number / (a * a))
 
 c = get_tick_at_sqrt_ratio(a)
 print(c)
@@ -28,6 +30,7 @@ print('----------------------------------')
 
 print(get_tick_at_sqrt_ratio(1637261839662082274827076810251933))
 
+print('----------------------------------')
 print(
     burn(
         184200,
@@ -37,3 +40,12 @@ print(
         198734
     )
 )
+t = 1637261839662082274827076810251933 / (2 ** 96)
+print(t)
+print(t * t)
+print('----------------------------------')
+print(int.from_bytes(bytes.fromhex("fffffffffffffffffffffffffffffffffffffffffffffffffffffee2f236561a"), byteorder='big', signed=True))
+print(int.from_bytes(bytes.fromhex("00000000000000000000000000000000000000000000001d471aa54807170000"), byteorder='big', signed=True))
+print(int.from_bytes(bytes.fromhex("00000000000000000000000000000000000051fa4af40d67c620c13caa45f01d"), byteorder='big', signed=True))
+print(int.from_bytes(bytes.fromhex("000000000000000000000000000000000000000000000000ff91fc0652a963da"), byteorder='big', signed=True))
+print(int.from_bytes(bytes.fromhex("0000000000000000000000000000000000000000000000000000000000030982"), byteorder='big', signed=True))

@@ -263,7 +263,7 @@ class ECIES:
                 self.remote_ephemeral_pubkey
             )
         if heid is not None:
-            if keccak(self.remote_ephemeral_pubkey) != heid:
+            if keccak(self.remote_ephemeral_pubkey.to_bytes()) != heid:
                 raise ParseError("The hash of the ephemeral key should match.")
     
     def parse_auth_EIP8(self, data: bytes) -> None:
@@ -293,7 +293,7 @@ class ECIES:
             byteorder="big"
         )
         enc_ack_body = encrypt(ack_body, self.remote_pubkey, ack_size_bytes)
-        self.init_msg = b"".join(ack_size_bytes, enc_ack_body)
+        self.init_msg = b"".join((ack_size_bytes, enc_ack_body))
         self.setup_frame(True)
         return self.init_msg
 

@@ -49,6 +49,7 @@ import rlp
 from rlp.exceptions import DecodingError
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey, PublicKey, Signature
+from eth_keys.exceptions import BadSignature
 from eth_hash.auto import keccak
 from eth_utils import ValidationError
 
@@ -191,6 +192,11 @@ class Message(metaclass=ABCMeta):
         try:
             public_key = KeyAPI().ecdsa_recover(sig_hash, signature)
         except ValidationError as err:
+            raise DecodeFormatError(
+                "Occerred an error when recovering public key. "
+                f"Detail: {err}"
+            )
+        except BadSignature as err:
             raise DecodeFormatError(
                 "Occerred an error when recovering public key. "
                 f"Detail: {err}"

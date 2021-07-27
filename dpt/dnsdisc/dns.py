@@ -99,7 +99,7 @@ def get_txt_record(subdomain: str, context: Context) -> str:
     result = b"".join(rrset[0].strings).decode()
     if len(result) == 0:
         raise EmptyResolvedError("Received empty TXT record.")
-    logger.debug(f"Successfully resolve domain: {location}")
+    logger.info(f"Successfully resolve domain: {location}")
     dns_tree_cache[subdomain] = result
     return result
     
@@ -202,7 +202,7 @@ def get_peers(domains: List[str]) -> List[PeerNetworkInfo]:
             if peer not in peers:
                 peers.append(peer)
                 cnt += 1
-        logger.debug(
+        logger.info(
             f"Got {cnt} new peer(s) candidate from DNS address={peer.address}"
         )
     return peers

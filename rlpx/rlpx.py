@@ -105,7 +105,7 @@ class RLPx:
             try:
                 peer = Peer(
                     self.id,
-                    peer_info.id,
+                    None if peer_info is None else peer_info.id,
                     socket_stream,
                     self.private_key,
                     self.after_connected,
@@ -127,7 +127,7 @@ class RLPx:
                 logger.error(
                     f"Occerred OSError, detail: {err}."
                 )
-        if peer is not None:
+        if peer is not None and peer.remote_id is not None:
             self.dpt.ban_peer(peer.remote_id)
         logger.info(f"Disconnect from {rckey}.")
     
@@ -165,9 +165,12 @@ class RLPx:
             self.peers_queue.append(peer)
     
     def on_remove_peer(self, peer_id: PublicKey) -> None:
+        want_to_remove = []
         for d in self.peers_queue:
             if d.id == peer_id:
-                self.peers_queue.remove(d)
+                want_to_remove.append(d)
+        for d in want_to_remove:
+            self.peers_queue.remove(d)
     
     async def refill_loop(self) -> Coroutine:
         async with trio.open_nursery() as refill_loop:

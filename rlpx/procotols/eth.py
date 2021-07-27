@@ -24,6 +24,7 @@ eth62 = Capability("eth", 62, 8)
 eth63 = Capability("eth", 63, 17)
 eth64 = Capability("eth", 64, 29)
 eth65 = Capability("eth", 65, 29)
+# eth66 = Capability("eth", 66, 29)
 
 
 class MESSAGE_CODES(Enum):
@@ -310,7 +311,8 @@ class EthProcotol(Procotol):
 
 
 
-Procotol.register(eth62, EthProcotol)
+# Procotol.register(eth62, EthProcotol)
 Procotol.register(eth63, EthProcotol)
 Procotol.register(eth64, EthProcotol)
 Procotol.register(eth65, EthProcotol)
+# Procotol.register(eth66, EthProcotol)
