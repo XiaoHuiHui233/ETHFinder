@@ -72,7 +72,8 @@ class ETHController:
     async def handle_receipts(self, payload: RLP) -> Coroutine:
         for receipt in payload:
             for log in receipt[3]:
-                if log[0] == bytes.fromhex("8ad599c3a0ff1de082011efddc58f1908eb6e6d8"):
+                if log[0] == bytes.fromhex("8ad599c3a0ff1de082011efddc58f1908eb6e6d8") and \
+                    log[1][0] == bytes.fromhex("c42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"):
                     # amount0 = int.from_bytes(log[2][:32], byteorder="big", signed=True)
                     # amount1 = int.from_bytes(log[2][32:64], byteorder="big", signed=True)
                     # liquidity = int.from_bytes(log[2][64:96], byteorder="big", signed=True)

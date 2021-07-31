@@ -10,33 +10,29 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.8"
+__version__ = "1.10"
 
 import math
 import random
 import logging
-from logging import FileHandler, Formatter
-from typing import List, Dict
 import base64
+import traceback
 
-from dns import rdatatype
-from dns.resolver import Resolver, NXDOMAIN, NoNameservers
+from dns.rdatatype import TXT
+from dns.resolver import Answer, Resolver
 from eth_keys.datatypes import PublicKey
 
-from dpt.dnsdisc import enr
-from dpt.dnsdisc.enr import ENRFormatError
-from dpt.classes import PeerNetworkInfo
+from . import enr
+from .datatypes import PeerNetworkInfo
 
-import config as opts
-
-logger = logging.getLogger("dnsdisc")
-fh = FileHandler("./logs/dnsdisc.log")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+logger = logging.getLogger("nodedisc.dnsdisc")
+fh = logging.FileHandler("./logs/nodedisc/dnsdisc.log")
+fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
 fh.setLevel(logging.INFO)
 logger.addHandler(fh)
 
-dns_tree_cache = {}
+dns_tree_cache: dict[str, str] = {}
 resolver = Resolver()
 
 
@@ -45,26 +41,14 @@ class Context:
     parsing process and verify the legitimacy of the parsing elements.
     """
 
-    def __init__(self, domain: str, public_key: bytes) -> None:
+    def __init__(self, domain: str, public_key_base64: bytes) -> None:
         self.domain = domain
         # Base32 strings also need padding.
-        public_key_bytes = base64.b32decode("".join((public_key, "===")))
+        public_key_bytes = base64.b32decode(
+            "".join((public_key_base64, "==="))
+        )
         self.public_key = PublicKey.from_compressed_bytes(public_key_bytes)
-        self.visits: Dict[str, bool] = {}
-
-
-class EmptyResolvedError(Exception):
-    """An error indicating that the text result of DNS resolution is
-    empty.
-    """
-    pass
-
-
-class UnresolvableError(Exception):
-    """An error indicating that random branch selection cannot be
-    resolved.
-    """
-    pass
+        self.visits: dict[str, bool] = {}
 
 
 def get_txt_record(subdomain: str, context: Context) -> str:
@@ -82,45 +66,36 @@ def get_txt_record(subdomain: str, context: Context) -> str:
         location = f"{subdomain}.{context.domain}"
     else:
         location = context.domain
-    try:
-        rrset = resolver.query(location, rdatatype.TXT).rrset
-    except NXDOMAIN as err:
-        raise EmptyResolvedError(
-            f"Occerred a NXDOMAIN error. Detail: {err}"
-        )
-    except NoNameservers as err:
-        raise EmptyResolvedError(
-            f"Occerred a NoNameservers error. Detail: {err}"
-        )
-    if not rrset:
-        raise EmptyResolvedError(
+    rrset: Answer = resolver.query(location, TXT).rrset
+    if rrset is None:
+        raise ValueError(
             "Received empty result array while fetching TXT record."
         )
     result = b"".join(rrset[0].strings).decode()
     if len(result) == 0:
-        raise EmptyResolvedError("Received empty TXT record.")
+        raise ValueError("Received empty TXT record.")
     logger.info(f"Successfully resolve domain: {location}")
     dns_tree_cache[subdomain] = result
     return result
     
 
-def select_random_path(branches: List[str], context: Context) -> str:
+def select_random_path(branches: list[str], context: Context) -> str:
     """Randomly return a branch from branches.
 
     The branches those have been searched will be ignored.
 
-    :param List[str] branches: List of branches to be selected.
+    :param list[str] branches: list of branches to be selected.
     :param Context context: The context of the recording of selected
         branch.
     :return str: A randomly selected branch.
     :raise UnresolvableError: If all branches have been selected.
     """
-    circular_refs: Dict[str, bool] = {}
+    circular_refs: dict[str, bool] = {}
     for idx, subdomain in enumerate(branches):
         if subdomain in context.visits:
             circular_refs[idx] = True
     if len(circular_refs) == len(branches):
-        raise UnresolvableError("Unresolvable circular path detected.")
+        raise ValueError("Unresolvable circular path detected.")
     index = math.floor(random.random() * len(branches))
     while (index in circular_refs
             and circular_refs[index]):
@@ -154,7 +129,8 @@ def search(subdomain: str, context: Context) -> PeerNetworkInfo:
         entry = get_txt_record(subdomain, context)
         context.visits[subdomain] = True
         if (entry.startswith(enr.RECORD_PREFIX)):
-            return enr.parse_and_verify_record(entry)
+            ip, udp, tcp = enr.parse_and_verify_record(entry)
+            return PeerNetworkInfo(ip, udp, tcp)
         elif (entry.startswith(enr.BRANCH_PREFIX)):
             branches = enr.parse_branch(entry)
             next = select_random_path(branches, context)
@@ -162,47 +138,31 @@ def search(subdomain: str, context: Context) -> PeerNetworkInfo:
         elif (entry.startswith(enr.ROOT_PREFIX)):
             next = enr.parse_and_verify_root(entry, context.public_key)
             return search(next, context)
-    except EmptyResolvedError as err:
-        logger.warning(
-            f"Errored searching DNS tree at subdomain {subdomain}"
+    except:
+        logger.error(
+            f"Errored searching DNS tree at subdomain {subdomain}."
         )
-        logger.error(f"EmptyResolvedError: {err}")
-    except UnresolvableError as err:
-        logger.warning(
-            f"Errored searching DNS tree at subdomain {subdomain}"
-        )
-        logger.error(f"UnresolvableError: {err}")
-    except ENRFormatError as err:
-        logger.warning(
-            f"Errored parsing ENR node record at subdomain {subdomain}"
-        )
-        logger.error(f"ENRFormatError: {err}")
-    return None
+        logger.error(traceback.format_exc())
 
 
-def get_peers(domains: List[str]) -> List[PeerNetworkInfo]:
-    """Returns a list of all node network information resolved by a
-    given DNS domain list.
+def get_peers(domain: str, peer_num: int) -> set[PeerNetworkInfo]:
+    """Returns a set of nodes resolved by a given DNS domain.
 
-    This method will recursively resolve all domain in the given list
-    without specifying an upper limit.
-
-    :param List[str] domains: A list of domain.
-    :return List[PeerNetworkInfo]: A list of node network information.
+    :param str domain: A DNS domain.
+    :param int peer_num: The number of peers are wanted to return. 
+    :return set[PeerNetworkInfo]: A set of node network information.
     """
-    peers: List[PeerNetworkInfo] = []
-    for dns_network in domains:
-        cnt = 0
-        for i in range(opts.MAX_DNS_PEERS):
-            public_key, domain = enr.parse_tree(dns_network)
-            context = Context(domain, public_key)
-            peer = search(domain, context)
-            if peer is None:
-                continue
-            if peer not in peers:
-                peers.append(peer)
-                cnt += 1
-        logger.info(
-            f"Got {cnt} new peer(s) candidate from DNS address={peer.address}"
-        )
+    global dns_tree_cache
+    dns_tree_cache = {}
+    peers: set[PeerNetworkInfo] = set()
+    while peer_num > 0:
+        public_key, subdomain = enr.parse_tree(domain)
+        context = Context(subdomain, public_key)
+        peer = search(subdomain, context)
+        if peer is not None:
+            peers.add(peer)
+        peer_num -= 1
+    logger.info(
+        f"Got {len(peers)} new peer(s) candidate from DNS address={domain}"
+    )
     return peers

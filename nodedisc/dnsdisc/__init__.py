@@ -10,4 +10,10 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.3"
+__version__ = "1.4"
+
+from . import dns
+from . import enr
+from .datatypes import PeerNetworkInfo
+
+__all__ = ["dns", "enr", "PeerNetworkInfo"]

@@ -8,32 +8,25 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.4"
+__version__ = "1.6"
 
-from binascii import Error
-from typing import Tuple, List
 import base64
+import ipaddress
+from typing import Union
 
 import parse
 import rlp
-from rlp import DeserializationError
 from eth_keys import KeyAPI
 from eth_keys.datatypes import Signature, PublicKey
 from eth_hash.auto import keccak
-
-from dpt.classes import PeerNetworkInfo
 
 TREE_PREFIX = "enrtree:"
 RECORD_PREFIX = "enr:"
 BRANCH_PREFIX = "enrtree-branch:"
 ROOT_PREFIX = "enrtree-root:"
 
-
-class ENRFormatError(Exception):
-    """Indicates an error that the ENR expression cannot be parsed
-    correctly.
-    """
-    pass
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 
 def base64_padding(raw: str) -> str:
@@ -59,7 +52,7 @@ def base64_padding(raw: str) -> str:
     return raw
 
 
-def parse_tree(tree: str) -> Tuple[str, str]:
+def parse_tree(tree: str) -> tuple[str, str]:
     """Parse the enrtree expression and return the domain and public
     key.
 
@@ -77,17 +70,15 @@ def parse_tree(tree: str) -> Tuple[str, str]:
     See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 
     :param str tree: The enrtree expression.
-    :return Tuple[str, str]: The domain and public key.
-    :raise ENRFormatError: If the enrtree expression doesn't start with
-        TREE_PREFIX.
+    :return tuple[str, str]: The domain and public key.
     """
     if not tree.startswith(TREE_PREFIX):
-        raise ENRFormatError(f"ENRTree should start with '{TREE_PREFIX}'")
+        raise ValueError(f"ENRTree should start with '{TREE_PREFIX}'")
     ss = tree[len(TREE_PREFIX) + 2:].split("@")
     return ss[0], ss[1]
 
 
-def parse_and_verify_record(enr: str) -> PeerNetworkInfo:
+def parse_and_verify_record(enr: str) -> tuple[IPAddress, int, int]:
     """Parse the enr node record expression and verify it by ecdsa.
     Return an object represents the network infomation of a peer which
     is contained by the enr node expression.
@@ -113,30 +104,21 @@ def parse_and_verify_record(enr: str) -> PeerNetworkInfo:
     See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-778.md
 
     :param str enr: The enr node record expression.
-    :return Tuple[str, str]: The domain and public key.
+    :return tuple[IPAddress, int, int]: Ip address, udp port and tcp
+        port of a node.
     :raise ENRFormatError: If the enr node record expression doesn't
         start with RECORD_PREFIX or unabled to verify the signature or
         rlp parsing and ip formatting is failed.
     """
     if not enr.startswith(RECORD_PREFIX):
-        raise ENRFormatError(
+        raise ValueError(
             f"String encoded ENR must start with '{RECORD_PREFIX}'"
         )
     body = enr[len(RECORD_PREFIX):]
-    try:
-        # ENRs are RLP encoded and written to DNS TXT entries as base64
-        # url-safe strings.
-        enr_bytes = base64.urlsafe_b64decode(base64_padding(body))
-        result = rlp.decode(enr_bytes)
-    except Error as err:
-        raise ENRFormatError(
-            "Occerred an error when parsing ENR body base64 string. Detail: "
-            f"{err}"
-        )
-    except DeserializationError as err:
-        raise ENRFormatError(
-            f"ENR body must follow the rlp syntax. Detail: {err}"
-        )
+    # ENRs are RLP encoded and written to DNS TXT entries as base64
+    # url-safe strings.
+    enr_bytes = base64.urlsafe_b64decode(base64_padding(body))
+    result: RLP = rlp.decode(enr_bytes)
     # The public key of some parsing results is not 65-byte, indicating
     # that it does not contain recid bits. But the analysis here doesn't
     # seem to need this bit, just add one bit to it.
@@ -144,30 +126,21 @@ def parse_and_verify_record(enr: str) -> PeerNetworkInfo:
     if len(sig_bytes) == 64:
         sig_bytes.append(0)
     sig = Signature(bytes(sig_bytes))
-    # seq = result[1]
     kvs = result[2:]
     # Convert ENR key/value pairs to object
-    obj = {}
+    obj: dict[str, bytes] = {}
     for i in range(0, len(kvs), 2):
         obj[kvs[i].decode()] = kvs[i + 1]
     raw_datas = result[1:]
     msg_hash = keccak(rlp.encode(raw_datas))
     public_key = PublicKey.from_compressed_bytes(obj["secp256k1"])
     if not KeyAPI().ecdsa_verify(msg_hash, sig, public_key):
-        raise ENRFormatError("Unable to verify ENR node record signature.")
-    try:
-        return PeerNetworkInfo.format(obj["ip"], obj["udp"], obj["tcp"])
-    except ValueError as err:
-        raise ENRFormatError(
-            "Unable to generate a object to represent the network infomation "
-            f"of a peer. Probably IP adress format error? Detail: {err}"
-        )
-    except KeyError as err:
-        raise ENRFormatError(
-            "Unable to generate a object to represent the network infomation "
-            "of a peer. Probably this node record doesn't contain ip or "
-            f"ports? Detail: {err}"
-        )
+        raise ValueError("Unable to verify ENR node record signature.")
+    return (
+        ipaddress.ip_address(obj["ip"]),
+        int.from_bytes(obj["udp"], "big"),
+        int.from_bytes(obj["tcp"], "big")
+    )
 
 
 def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
@@ -207,7 +180,7 @@ def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
         start with ROOT_PREFIX or unabled to verify the signature.
     """
     if not root.startswith(ROOT_PREFIX):
-        raise ENRFormatError(f"ENR root entry must start with '{ROOT_PREFIX}'")
+        raise ValueError(f"ENR root entry must start with '{ROOT_PREFIX}'")
     e, l, seq, sig = parse.parse(
         ROOT_PREFIX + "v1 e={} l={} seq={} sig={}",
         root
@@ -228,11 +201,11 @@ def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
     # base64 string (Trailing recovery bit must be trimmed to pass
     # `ecdsaVerify` method)
     if not KeyAPI().ecdsa_verify(msg_hash, sig, public_key):
-        raise ENRFormatError("Unable to verify ENR root signature.")
+        raise ValueError("Unable to verify ENR root signature.")
     return e
 
 
-def parse_branch(branch: str) -> List[str]:
+def parse_branch(branch: str) -> list[str]:
     """Parse the enr tree branch expression and verify it by ecdsa.
     Return a list of subdomain strings those will be resolved later.
 
@@ -250,14 +223,14 @@ def parse_branch(branch: str) -> List[str]:
     See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 
     :param str branch: The enr tree branch expression.
-    :return List[str] A list of subdomain strings will be resolved
+    :return list[str] A list of subdomain strings will be resolved
         later.
     :raise ENRFormatError: If the enr node record expression doesn't
         start with BRANCH_PREFIX.
     """
     if not branch.startswith(BRANCH_PREFIX):
-        raise ENRFormatError(
+        raise ValueError(
             f"ENR branch entry must start with '{BRANCH_PREFIX}'"
         )
-    return branch[len(BRANCH_PREFIX):].split(',')
+    return branch[len(BRANCH_PREFIX):].split(",")
 
