@@ -37,32 +37,22 @@ See: https://eips.ethereum.org/EIPS/eip-868
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.10"
+__version__ = "2.1"
 
 import time
-import logging
-from logging import FileHandler, Formatter
-from typing import ClassVar, List, TypeVar, Tuple, Type
-from abc import ABCMeta, abstractmethod
+import ipaddress
+from typing import Union
+from abc import abstractmethod
 
 import rlp
-from rlp.exceptions import DecodingError
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey, PublicKey, Signature
-from eth_keys.exceptions import BadSignature
 from eth_hash.auto import keccak
-from eth_utils import ValidationError
 
-from dpt.classes import PeerNetworkInfo, PeerInfo
+from ..datatypes import Message, PeerInfo
 
-RLP = TypeVar("RLP", List[List[bytes]], List[bytes], bytes)
-
-logger = logging.getLogger("dpt.discv4")
-fh = FileHandler("./logs/dpt.log")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
-logger.addHandler(fh)
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 
 def timestamp() -> bytes:
@@ -70,40 +60,17 @@ def timestamp() -> bytes:
 
     :return bytes: UNIX timestamp converted to bytes.
     """
-    return int(time.time()) + 60
+    return int.to_bytes(int(time.time()) + 60, 8, "big")
 
 
-class DecodeFormatError(Exception):
-    """An error indicating that the decoding failed and there is a
-    format problem.
-    """
-    pass
-
-
-class Message(metaclass=ABCMeta):
+class MessageV4(Message):
     """The base abstract class of the communication packet of the
-    Node Discovery Protocol v4 specification.
-
-    See: https://github.com/ethereum/devp2p/blob/master/discv4.md
+    Node Discovery Protocol v4.
     """
+    def __init__(self, private_key: PrivateKey) -> None:
+        self.private_key = private_key
 
-    MY_SONS: ClassVar[List[Type["Message"]]] = []
-
-    def __init__(self, type_id: int) -> None:
-        self.type_id = type_id
-
-    @abstractmethod
-    def encode(self) -> RLP:
-        """Each subclass of this class should implement this function to
-        convert its own information into bytes list which will be
-        encoded by the rlp specification.
-
-        :return RLP: A list of bytes conforming to the recursive length
-            prefix specification.
-        """
-        return NotImplemented
-    
-    def pack(self, private_key: PrivateKey) -> bytes:
+    def to_bytes(self) -> bytes:
         """Encapsulate the communication packet according to the
         specification in Node Discovery Protocol v4.
 
@@ -133,22 +100,29 @@ class Message(metaclass=ABCMeta):
         packet-data list as well as any extra data after the list.
 
         See: https://github.com/ethereum/devp2p/blob/master/discv4.md
-
-        :param PrivateKey private_key: Private key.
         """
-        packet_data = rlp.encode(self.encode())
+        packet_data = rlp.encode(self.to_RLP())
         packet_type = int.to_bytes(self.type_id, byteorder="big", length=1)
         sig = KeyAPI().ecdsa_sign(
-            keccak(b"".join((packet_type, packet_data))), private_key
+            keccak(b"".join((packet_type, packet_data))), self.private_key
         ).to_bytes()
         hash = keccak(b"".join((sig, packet_type, packet_data)))
         return b"".join((hash, sig, packet_type, packet_data))
     
+    @abstractmethod
+    def to_RLP(self) -> RLP:
+        """Each subclass should implement this function to convert
+        its own information into RLP.
+
+        :return RLP: A recursive length prefix.
+        """
+        return NotImplemented
+
     @classmethod
-    def unpack(cls, datas: bytes) -> Tuple[bytes, "Message", PublicKey]:
+    def unpack(cls, datas: bytes) -> tuple[bytes, "MessageV4", PublicKey]:
         """Analyze the received packet according to the packet format.
 
-        Format of bytes stream as following:
+        The format of bytes stream as following:
 
         [0, 32) represents data hash.
         [32, 96) represents signature.
@@ -160,51 +134,25 @@ class Message(metaclass=ABCMeta):
         :return bytes: The hash bytes.
         :return Message: The packet.
         :return PublicKey: The public key from sender.
-        :raise DecodeFormatError: If occerred an error when decoding.
         """
         if len(datas) < 98:
-            raise DecodeFormatError(
-                "Occerred an error because recieved packet is not long enough."
-            )
+            raise ValueError("Packet size is not large enough.")
         new_hash_bytes = keccak(datas[32:])
         raw_hash_bytes = datas[:32]
         type_id = datas[97]
         if raw_hash_bytes != new_hash_bytes:
-            raise DecodeFormatError(
-                f"Hash verification failed on type {type_id}: "
-                f"{raw_hash_bytes.hex()[:7]} / {new_hash_bytes.hex()[:7]}"
-            )
+            raise ValueError("Packet hash verification failed.")
         packet_data = datas[98:]
-        try:
-            msg = Message.MY_SONS[type_id - 1].decode(rlp.decode(packet_data, strict=False))
-        except DecodingError as err:
-            raise DecodeFormatError(
-                "Occerred an error when rlp decoding. "
-                f"Detail: {err}"
-            )
-        except ValueError as err:
-            raise DecodeFormatError(
-                "Occerred an error when message decoding. "
-                f"Detail: {err}"
-            )
+        msg = MessageV4.MESSAGES[type_id - 1].decode(
+            rlp.decode(packet_data, strict=False)
+        )
         sig_hash = keccak(datas[97:])
         signature = Signature(datas[32: 97])
-        try:
-            public_key = KeyAPI().ecdsa_recover(sig_hash, signature)
-        except ValidationError as err:
-            raise DecodeFormatError(
-                "Occerred an error when recovering public key. "
-                f"Detail: {err}"
-            )
-        except BadSignature as err:
-            raise DecodeFormatError(
-                "Occerred an error when recovering public key. "
-                f"Detail: {err}"
-            )
+        public_key = KeyAPI().ecdsa_recover(sig_hash, signature)
         return raw_hash_bytes, msg, public_key
 
 
-class PingMessage(Message):
+class PingMessage(MessageV4):
     """The encapsulation of ping packet of the Node Discovery Protocol
     v4 specification.
 
@@ -218,32 +166,36 @@ class PingMessage(Message):
     processed.
 
     The enr-seq field is the current ENR sequence number of the sender.
-    This field is optional. So we did not implement it.
+    This field is optional.
 
     See: https://github.com/ethereum/devp2p/blob/master/discv4.md
     """
-
     VERSION = 0x04
 
-    def __init__(self, from_peer: PeerNetworkInfo,
-            to_peer: PeerNetworkInfo) -> None:
-        super().__init__(0x01)
+    def __init__(self, private_key: PrivateKey, from_peer: PeerInfo,
+            to_peer: PeerInfo, enr_seq: int = 0) -> None:
+        super().__init__(private_key)
         self.from_peer = from_peer
         self.to_peer = to_peer
+        self.enr_seq = enr_seq
 
     def __repr__(self) -> str:
-        return "ping-packet"
+        return "ping-packet v4"
     
-    def encode(self) -> RLP:
+    def to_RLP(self) -> RLP:
         """Converted the ping-packet into a bytes list, easy to use RLP
         expression.
 
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        from_bytes = self.from_peer.encode()[:3]
-        to_bytes = self.to_peer.encode()[:3]
-        return [PingMessage.VERSION, from_bytes, to_bytes, timestamp()]
+        return [
+            int.to_bytes(PingMessage.VERSION, 1, "big"),
+            self.from_peer.to_RLP(),
+            self.to_peer.to_RLP(),
+            timestamp(),
+            int.to_bytes(self.enr_seq, 8, "big", signed=False)
+        ]
     
     @classmethod
     def decode(cls, payload: RLP) -> "PingMessage":
@@ -251,28 +203,33 @@ class PingMessage(Message):
 
         :param RLP payload: The RLP bytes stream.
         :return PingMessage: An object of ping-packet.
-        :raise DecodeFormatError: If occerred an error when decoding.
         """
         if len(payload) < 4:
-            raise DecodeFormatError(
-                "The length of RLP is not enough to generate a ping message."
+            raise ValueError(
+                "The elements in RLP is not enough to generate a ping message."
             )
         expiration = int.from_bytes(payload[3], byteorder="big")
         if time.time() > expiration:
-            raise DecodeFormatError("The received ping packet has expired.")
+            raise ValueError("The received ping packet has expired.")
         version = int.from_bytes(payload[0], byteorder="big")
         if version != PingMessage.VERSION:
-            raise DecodeFormatError(
-                f"Recieved ping packet version: {version}. But we expect "
-                f"{PingMessage.VERSION}."
+            raise ValueError("Ping message version is unsupported.")
+        if len(payload) >= 5:
+            return cls(
+                None,
+                PeerInfo.decode(payload[1]),
+                PeerInfo.decode(payload[2]),
+                int.from_bytes(payload[4], "big")
             )
-        return cls(
-            PeerNetworkInfo.decode(payload[1]),
-            PeerNetworkInfo.decode(payload[2])
-        )
+        else:
+            return cls(
+                None,
+                PeerInfo.decode(payload[1]),
+                PeerInfo.decode(payload[2])
+            )
 
 
-class PongMessage(Message):
+class PongMessage(MessageV4):
     """The encapsulation of pong packet of the Node Discovery Protocol
     v4 specification.
 
@@ -285,26 +242,32 @@ class PongMessage(Message):
     contain the hash of the most recent ping packet.
 
     The enr-seq field is the current ENR sequence number of the sender.
-    This field is optional. So we did not implement it.
+    This field is optional.
     """
 
-    def __init__(self, to: PeerNetworkInfo, ping_hash: bytes) -> None:
-        super().__init__(0x02)
-        self.to = to
+    def __init__(self, private_key: PrivateKey, to_peer: PeerInfo,
+            ping_hash: bytes, enr_seq: int = 0) -> None:
+        super().__init__(private_key)
+        self.to_peer = to_peer
         self.ping_hash = ping_hash
+        self.enr_seq = enr_seq
 
     def __repr__(self) -> str:
-        return "pong-packet"
+        return "pong-packet v4"
 
-    def encode(self) -> RLP:
+    def to_RLP(self) -> RLP:
         """Converted the pong-packet into a bytes list, easy to use RLP
         expression.
 
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        to_bytes = self.to.encode()[:3]
-        return [to_bytes, self.ping_hash, timestamp()]
+        return [
+            self.to_peer.to_RLP(),
+            self.ping_hash,
+            timestamp(),
+            int.to_bytes(self.enr_seq, 8, "big", signed=False)
+        ]
     
     @classmethod
     def decode(cls, payload: RLP) -> "PongMessage":
@@ -312,22 +275,30 @@ class PongMessage(Message):
 
         :param RLP payload: The RLP bytes stream.
         :return PongMessage: An object of pong-packet.
-        :raise DecodeFormatError: If occerred an error when decoding.
         """
         if len(payload) < 3:
-            raise DecodeFormatError(
-                "The length of RLP is not enough to generate a pong message."
+            raise ValueError(
+                "The elements in RLP is not enough to generate a pong message."
             )
         expiration = int.from_bytes(payload[2], byteorder="big")
         if time.time() > expiration:
-            raise DecodeFormatError(f"The received pong packet has expired.")
-        return cls(
-            PeerNetworkInfo.decode(payload[0]),
-            payload[1]
-        )
+            raise ValueError("The received pong packet has expired.")
+        if len(payload) >= 4:
+            return cls(
+                None,
+                PeerInfo.decode(payload[0]),
+                payload[1],
+                int.from_bytes(payload[3], "big")
+            )
+        else:
+            return cls(
+                None,
+                PeerInfo.decode(payload[0]),
+                payload[1]
+            )
 
 
-class FindNeighboursMessage(Message):
+class FindNeighboursMessage(MessageV4):
     """The encapsulation of findneighbours packet of the Node Discovery
     Protocol v4 specification.
 
@@ -339,21 +310,24 @@ class FindNeighboursMessage(Message):
     containing the closest 16 nodes to target found in its local table.
     """
 
-    def __init__(self, target: PublicKey) -> None:
-        super().__init__(0x03)
+    def __init__(self, private_key: PrivateKey, target: PublicKey) -> None:
+        super().__init__(private_key)
         self.target = target
     
     def __repr__(self) -> str:
-        return "findneighbours-packet"
+        return "findneighbours-packet v4"
     
-    def encode(self) -> RLP:
+    def to_RLP(self) -> RLP:
         """Converted the findneighbour-packet into a bytes list, easy to
         use RLP expression.
 
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        return [self.target.to_bytes(), timestamp()]
+        return [
+            self.target.to_bytes(),
+            timestamp()
+        ]
     
     @classmethod
     def decode(cls, payload: RLP) -> "FindNeighboursMessage":
@@ -362,22 +336,24 @@ class FindNeighboursMessage(Message):
         :param RLP payload: The RLP bytes stream.
         :return FindNeighboursMessage: An object of
             findneighbours-packet.
-        :raise DecodeFormatError: If occerred an error when decoding.
         """
         if len(payload) < 2:
-            raise DecodeFormatError(
+            raise ValueError(
                 "The length of RLP is not enough to generate a findneighbours"
                 " message."
             )
         expiration = int.from_bytes(payload[1], byteorder="big")
         if time.time() > expiration:
-            raise DecodeFormatError(
+            raise ValueError(
                 "The received findneighbours packet has expired."
             )
-        return cls(PublicKey(payload[0]))
+        return cls(
+            None,
+            PublicKey(payload[0])
+        )
 
 
-class NeighboursMessage(Message):
+class NeighboursMessage(MessageV4):
     """The encapsulation of neighbours packet of the Node Discovery
     Protocol v4 specification.
 
@@ -387,21 +363,25 @@ class NeighboursMessage(Message):
     Neighbors is the reply to FindNode.
     """
 
-    def __init__(self, peers: List[PeerInfo]) -> None:
-        super().__init__(0x04)
-        self.peers = peers
+    def __init__(self, private_key: PrivateKey,
+            nodes: list[PeerInfo]) -> None:
+        super().__init__(private_key)
+        self.nodes = nodes
 
     def __repr__(self) -> str:
-        return "neighbours-packet"
+        return "neighbours-packet v4"
     
-    def encode(self) -> RLP:
+    def to_RLP(self) -> RLP:
         """Converted the neighbour-packet into a bytes list, easy to
         use RLP expression.
 
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        return [[peer.encode() for peer in self.peers], timestamp()]
+        return [
+            [peer.to_RLP() for peer in self.nodes],
+            timestamp()
+        ]
     
     @classmethod
     def decode(cls, payload: RLP) -> "NeighboursMessage":
@@ -409,28 +389,133 @@ class NeighboursMessage(Message):
 
         :param RLP payload: The RLP bytes stream.
         :return NeighboursMessage: An object of neighbours-packet.
-        :raise DecodeFormatError: If occerred an error when decoding.
         """
         if len(payload) < 2:
-            raise DecodeFormatError(
+            raise ValueError(
                 "The length of RLP is not enough to generate a neighbours"
                 " message."
             )
         expiration = int.from_bytes(payload[1], byteorder="big")
         if time.time() > expiration:
-            raise DecodeFormatError(
+            raise ValueError(
                 "The received neighbours packet has expired."
             )
         return cls(
-            [PeerInfo.decode(payload) for payload in payload[0]]
+            None,
+            [PeerInfo.decode(data) for data in payload[0]]
         )
 
 
-Message.MY_SONS = [
+class ENRRequestMessage(MessageV4):
+    """The encapsulation of enr request packet of the Node Discovery
+    Protocol v4 specification.
+
+    packet-data = [expiration]
+
+    When a packet of this type is received, the node should reply with
+    an ENRResponse packet containing the current version of its node
+    record.
+    """
+
+    def __init__(self, private_key: PrivateKey) -> None:
+        super().__init__(private_key)
+
+    def __repr__(self) -> str:
+        return "enrrequest-packet v4"
+    
+    def to_RLP(self) -> RLP:
+        """Converted the enrrequest-packet into a bytes list, easy to
+        use RLP expression.
+
+        :return RLP: A list of bytes conforming to the recursive length
+            prefix specification.
+        """
+        return [
+            timestamp()
+        ]
+    
+    @classmethod
+    def decode(cls, payload: RLP) -> "ENRRequestMessage":
+        """Decode bytes stream to enrrequest packet and verify.
+
+        :param RLP payload: The RLP bytes stream.
+        :return ENRRequestMessage: An object of enrrequest-packet.
+        """
+        if len(payload) < 1:
+            raise ValueError(
+                "The length of RLP is not enough to generate a enrrequest"
+                " message."
+            )
+        expiration = int.from_bytes(payload[0], byteorder="big")
+        if time.time() > expiration:
+            raise ValueError(
+                "The received enrrequest packet has expired."
+            )
+        return cls(
+            None
+        )
+
+
+class ENRResponseMessage(MessageV4):
+    """The encapsulation of enr response packet of the Node Discovery
+    Protocol v4 specification.
+
+    packet-data = [request-hash, ENR]
+
+    This packet is the response to ENRRequest.
+
+    request-hash is the hash of the entire ENRRequest packet being
+        replied to.
+    ENR is the node record.
+
+    The recipient of the packet should verify that the node record is
+    signed by the public key which signed the response packet.
+    """
+
+    def __init__(self, private_key: PrivateKey, request_hash: bytes,
+            enr: bytes) -> None:
+        super().__init__(private_key)
+        self.request_hash = request_hash
+        self.enr = enr
+
+    def __repr__(self) -> str:
+        return "enrresponse-packet v4"
+    
+    def to_RLP(self) -> RLP:
+        """Converted the enrresponse-packet into a bytes list, easy to
+        use RLP expression.
+
+        :return RLP: A list of bytes conforming to the recursive length
+            prefix specification.
+        """
+        return [
+            self.request_hash,
+            self.enr
+        ]
+    
+    @classmethod
+    def decode(cls, payload: RLP) -> "ENRResponseMessage":
+        """Decode bytes stream to enrresponse packet and verify.
+
+        :param RLP payload: The RLP bytes stream.
+        :return NeighboursMessage: An object of enrresponse-packet.
+        """
+        if len(payload) < 2:
+            raise ValueError(
+                "The length of RLP is not enough to generate a"
+                " enrresponse message."
+            )
+        return cls(
+            None,
+            payload[0],
+            payload[1]
+        )
+
+MessageV4.MESSAGES = [
     PingMessage,
     PongMessage,
     FindNeighboursMessage,
     NeighboursMessage,
-    # ENRRequestMessage,
-    # ENRResponseMessage
+    ENRRequestMessage,
+    ENRResponseMessage
 ]

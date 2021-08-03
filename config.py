@@ -11,16 +11,17 @@ import ipaddress
 import secrets
 import atexit
 
-from eth_keys import KeyAPI
+from eth_keys.datatypes import PrivateKey
 import ujson
 
-from dpt.dnsdisc.enr import PeerNetworkInfo
 from rlpx.procotols.procotol import Capability
+from nodedisc.datatypes import PeerInfo
 
 
 # Basic config
-PRIVATE_KEY = KeyAPI.PrivateKey(secrets.token_bytes(32))
+PRIVATE_KEY = PrivateKey(secrets.token_bytes(32))
 # PRIVATE_KEY = KeyAPI.PrivateKey(bytes.fromhex("15b95cadffae45bb1cf7b8a7f643cbf1a6073ac588e57a88ae0cdb70c35d82fe"))
+PUBLIC_KEY = PRIVATE_KEY.public_key
 
 # DNS Discovery
 # EIP-1459 ENR tree urls to query for peer discovery
@@ -38,7 +39,12 @@ CLOSEST_NODE_NUM = 3
 # Timeout for peer requests
 SERVER_TIMEOUT = 3
 # Network info to send a long a request
-SERVER_ENDPOINT = PeerNetworkInfo(ipaddress.ip_address("0.0.0.0"), 30303, 30303)
+SERVER_ENDPOINT = PeerInfo(
+    PUBLIC_KEY,                      # public key as id
+    ipaddress.ip_address("0.0.0.0"), # ip address to bind
+    30303,                           # udp port to listen
+    30303                            # tcp port to listen
+)
 
 # DPT config
 # Interval for peer table refresh

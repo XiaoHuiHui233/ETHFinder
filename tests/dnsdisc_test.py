@@ -1,7 +1,7 @@
 import sys
 sys.path.append("./")
 
-from nodedisc.dnsdisc import dns
+from dnsdisc import dns
 
 # test for get 2000 peers
 peers = dns.get_peers(

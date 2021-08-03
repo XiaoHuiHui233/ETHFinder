@@ -36,6 +36,7 @@ python3 main.py
 
 |内容|是否完成|
 | :----: | :----: |
+|解耦模块并组件化系统|✅|
 |节点发现协议v5|❌|
 |节点发现和rlpx协议解耦|❌|
 |区块数据获取和解析解耦|❌|
@@ -51,7 +52,7 @@ python3 main.py
 
 `core` 核心模块，用于解析并处理接收到的以太坊链上消息。  
 `nodedisc` 节点发现协议模块，处理节点发现协议并维护DPT。  
-`nodedisc.dnsdisc` DNS节点发现协议，根据EIP-1459规范实现对以太坊DNS服务的解析。  
+`dnsdisc` DNS节点发现协议，根据EIP-1459规范实现对以太坊DNS服务的解析。  
 `nodedisc.discv4` 节点发现协议v4，提供节点发现服务.  
 `nodedisc.discv5` 节点发现协议v5，提供节点发现服务的升级.  
 `rlpx` rlpx协议，提供基于RLPx的基础网络通信接口。  
