@@ -60,15 +60,16 @@ def timestamp() -> bytes:
 
     :return bytes: UNIX timestamp converted to bytes.
     """
-    return int.to_bytes(int(time.time()) + 60, 8, "big")
+    return int.to_bytes(int(time.time()) + 60, 4, "big")
 
 
 class MessageV4(Message):
     """The base abstract class of the communication packet of the
     Node Discovery Protocol v4.
     """
-    def __init__(self, private_key: PrivateKey) -> None:
+    def __init__(self, private_key: PrivateKey, type_id: int) -> None:
         self.private_key = private_key
+        self.type_id = type_id
 
     def to_bytes(self) -> bytes:
         """Encapsulate the communication packet according to the
@@ -173,8 +174,8 @@ class PingMessage(MessageV4):
     VERSION = 0x04
 
     def __init__(self, private_key: PrivateKey, from_peer: PeerInfo,
-            to_peer: PeerInfo, enr_seq: int = 0) -> None:
-        super().__init__(private_key)
+            to_peer: PeerInfo, enr_seq: int = 1) -> None:
+        super().__init__(private_key, 0x01)
         self.from_peer = from_peer
         self.to_peer = to_peer
         self.enr_seq = enr_seq
@@ -194,7 +195,7 @@ class PingMessage(MessageV4):
             self.from_peer.to_RLP(),
             self.to_peer.to_RLP(),
             timestamp(),
-            int.to_bytes(self.enr_seq, 8, "big", signed=False)
+            # int.to_bytes(self.enr_seq, 8, "big", signed=False)
         ]
     
     @classmethod
@@ -247,7 +248,7 @@ class PongMessage(MessageV4):
 
     def __init__(self, private_key: PrivateKey, to_peer: PeerInfo,
             ping_hash: bytes, enr_seq: int = 0) -> None:
-        super().__init__(private_key)
+        super().__init__(private_key, 0x02)
         self.to_peer = to_peer
         self.ping_hash = ping_hash
         self.enr_seq = enr_seq
@@ -266,7 +267,7 @@ class PongMessage(MessageV4):
             self.to_peer.to_RLP(),
             self.ping_hash,
             timestamp(),
-            int.to_bytes(self.enr_seq, 8, "big", signed=False)
+            # int.to_bytes(self.enr_seq, 8, "big", signed=False)
         ]
     
     @classmethod
@@ -311,7 +312,7 @@ class FindNeighboursMessage(MessageV4):
     """
 
     def __init__(self, private_key: PrivateKey, target: PublicKey) -> None:
-        super().__init__(private_key)
+        super().__init__(private_key, 0x03)
         self.target = target
     
     def __repr__(self) -> str:
@@ -365,7 +366,7 @@ class NeighboursMessage(MessageV4):
 
     def __init__(self, private_key: PrivateKey,
             nodes: list[PeerInfo]) -> None:
-        super().__init__(private_key)
+        super().__init__(private_key, 0x04)
         self.nodes = nodes
 
     def __repr__(self) -> str:
@@ -418,7 +419,7 @@ class ENRRequestMessage(MessageV4):
     """
 
     def __init__(self, private_key: PrivateKey) -> None:
-        super().__init__(private_key)
+        super().__init__(private_key, 0x05)
 
     def __repr__(self) -> str:
         return "enrrequest-packet v4"
@@ -474,7 +475,7 @@ class ENRResponseMessage(MessageV4):
 
     def __init__(self, private_key: PrivateKey, request_hash: bytes,
             enr: bytes) -> None:
-        super().__init__(private_key)
+        super().__init__(private_key, 0x06)
         self.request_hash = request_hash
         self.enr = enr
 

@@ -94,15 +94,22 @@ class Server:
         """
         if self.switch:
             logger.info(
-                f"Send data to {peer.address}:{peer.udp_port} (peerId: "
-                f"{peer})."
+                f"Send data to {peer.address}:{peer.udp_port}."
             )
-            async with trio.move_on_after(self.lock_timeout) as cancel_scope:
+            with trio.move_on_after(self.lock_timeout) as cancel_scope:
                 async with self.send_lock:
-                    await self.server.sendto(
-                        data,
-                        (str(peer.address), peer.udp_port)
-                    )
+                    try:
+                        await self.server.sendto(
+                            data,
+                            (str(peer.address), peer.udp_port)
+                        )
+                    except:
+                        # TODO: fix this error
+                        # got socket.gaierror:
+                        # [Errno -9] Address family for hostname not supported
+                        # I don't know why, maybe about ipv6
+                        # but I can pass all exceptions here.
+                        pass
             if cancel_scope.cancelled_caught:
                 logger.warn(
                     "Stop sending after waiting for "

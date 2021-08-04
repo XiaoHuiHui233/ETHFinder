@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("test.nodedisc")
 fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh = logging.FileHandler("./logs/test/nodedisc.log", "w")
+fh = logging.FileHandler("./logs/test_nodedisc.log", "w")
 sh = logging.StreamHandler()
 fh.setFormatter(fmt)
 sh.setFormatter(fmt)
@@ -53,7 +53,7 @@ def get_enr(enr_seq: int) -> bytes:
         b"id",
         b"v4",
         b"ip",
-        int.to_bytes(int(ipaddress.ipaddress.ip_address()), 4, "big"),
+        int.to_bytes(int(ipaddress.ip_address("104.250.52.28")), 4, "big"),
         b"secp256k1",
         opts.PUBLIC_KEY.to_compressed_bytes(),
         b"udp",
@@ -72,20 +72,25 @@ class TestListenerV4(ListenerV4):
     """
     async def on_ping_timeout(self, peer: PeerInfo) -> None:
         rckey = f"{peer.address}:{peer.udp_port}"
+        # logger.info(f"on ping timeout {rckey}")
         if rckey in rckey_to_id:
-            dpt.remove_peer(rckey_to_id[rckey_to_id])
+            dpt.remove_peer(rckey_to_id[rckey])
             rckey_to_id.pop(rckey)
 
     async def on_pong(self, peer: PeerInfo, id: PublicKey) -> None:
         rckey = f"{peer.address}:{peer.udp_port}"
+        # logger.info(f"on pong {rckey}")
         if rckey in rckey_to_id:
-            dpt.remove_peer(rckey_to_id[rckey_to_id])
+            dpt.remove_peer(rckey_to_id[rckey])
         rckey_to_id[rckey] = id
         dpt.add_peer(peer, id)
     
-    async def on_find_neighbours(self, target: PublicKey) -> None:
+    async def on_find_neighbours(self, peer: PeerInfo,
+            target: PublicKey) -> None:
+        rckey = f"{peer.address}:{peer.udp_port}"
+        # logger.info(f"on find neighbours {rckey}")
         nodes = dpt.get_closest_peers(target, opts.CLOSEST_NODE_NUM)
-        await self.controller.neighbours(nodes)
+        await self.controller.neighbours(peer, nodes)
     
     async def on_neighbours(self, nodes: list[PeerInfo]) -> None:
         for peer in nodes:
@@ -118,12 +123,12 @@ async def alive_check(controller_v4: ControllerV4) -> None:
 
 async def query_dns_nodes(controller_v4: ControllerV4) -> None:
     for network in opts.DNS_NETWORKS:
-        dns_peers = dns.get_peers(network, opts.MAX_DNS_PEERS)
+        dns_peers = dns.get_peers(network, 20)
         logger.info(
             f"Adding {len(dns_peers)} from {network} DNS tree."
         )
         for peer in dns_peers:
-            await controller_v4.ping(peer)
+            await controller_v4.ping(PeerInfo.remake(peer))
             await trio.sleep(0.1)
 
 
@@ -132,13 +137,12 @@ async def refresh(controller_v4: ControllerV4) -> None:
     logger.info(
         f"Start refreshing. Now {len(dpt)} peers in table."
     )
-    if len(dpt) < opts.MAX_DPT_PEERS:
-        for peer in peers:
-            await controller_v4.findneighbours(
-                peer,
-                PublicKey(secrets.token_bytes(64))
-            )
-            await trio.sleep(0.1)
+    for peer in peers:
+        await controller_v4.find_neighbours(
+            peer,
+            PublicKey(secrets.token_bytes(64))
+        )
+        await trio.sleep(0.1)
 
 
 async def refresh_loop(controller_v4: ControllerV4) -> None:
@@ -166,10 +170,15 @@ async def test() -> None:
                 30303,
                 30303
             ),
-            0,
-            get_enr(0),
+            1,
+            get_enr(1),
             10
         )
-        listener_v4 = ListenerV4()
+        listener_v4 = TestListenerV4()
         controller_v4.register_listener(listener_v4)
         server.register_controller(controller_v4)
+        await trio.sleep(1)
+        nursery.start_soon(bootstrap, controller_v4)
+        nursery.start_soon(refresh_loop, controller_v4)
+
+trio.run(test)

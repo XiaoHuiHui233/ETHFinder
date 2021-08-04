@@ -46,7 +46,7 @@ class DPT:
             num_buckets
         )
         self.peers: dict[bytes, PeerInfo] = {}
-        self.banlist: LRU = LRU(10000)
+        self.banlist: dict[PublicKey, float] = LRU(10000)
 
     def __len__(self) -> int:
         return len(self.peers)
@@ -100,17 +100,23 @@ class DPT:
                 return
             else:
                 del self.banlist[id]
-        if id in self.kbucket:
-            logger.warn(f"Peer id {id.to_bytes().hex()[:7]} is in DHT.")
-            return
         if peer.tcp_port == 0:
             logger.warn(f"Peer id {id.to_bytes().hex()[:7]} has no tcp port.")
             return
-        logger.info(f"Peer id {id.to_bytes().hex()[:7]} was added to DHT.")
         id_hash = keccak(id.to_bytes())
+        if id_hash in self.kbucket:
+            logger.warn(f"Peer id {id.to_bytes().hex()[:7]} is in DHT.")
+            return
+        logger.info(f"Peer id {id.to_bytes().hex()[:7]} was added to DHT.")
         old = self.kbucket.update(id_hash)
         self.peers[id_hash] = peer
-        return self.peers[old] if old is not None else None
+        if old is None:
+            return None
+        else:
+            old_peer = self.peers[old]
+            self.peers.pop(old)
+            self.kbucket.remove(old)
+            return old_peer
 
     def remove_peer(self, peer_id: PublicKey) -> None:
         """Remove a peer by the given id.
@@ -122,18 +128,19 @@ class DPT:
             self.kbucket.remove(id_hash)
             if id_hash in self.peers:
                 logger.info(
-                    f"Peer id {id.to_bytes().hex()[:7]} was removed from DHT."
+                    f"Peer id {peer_id.to_bytes().hex()[:7]} "
+                    "was removed from DHT."
                 )
                 self.peers.pop(id_hash)
             else:
                 logger.warn(
-                    f"{peer_id} was not in kbucket, "
+                    f"{peer_id.to_bytes().hex()[:7]} was not in kbucket, "
                     "but in peers dict!"
                 )
         elif id_hash in self.peers:
             self.peers.pop(id_hash)
             logger.warn(
-                f"{peer_id} was not in peers dict, "
+                f"{peer_id.to_bytes().hex()[:7]} was not in peers dict, "
                 "but in kbucket!"
             )
     

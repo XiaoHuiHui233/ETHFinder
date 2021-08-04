@@ -14,4 +14,9 @@ See: https://github.com/ethereum/devp2p/blob/master/rlpx.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
+__version__ = "2.1"
+
+import os
+
+if not os.path.exists("./logs"):
+    os.makedirs("./logs")

@@ -157,8 +157,6 @@ class KademliaRoutingTable:
                 replacement_cache.remove(node_id)
             replacement_cache.appendleft(node_id)
             eviction_candidate = bucket[-1]
-        else:
-            raise Exception("Unreachable")
         return eviction_candidate
 
     def update_bucket_unchecked(self, node_id: bytes) -> None:

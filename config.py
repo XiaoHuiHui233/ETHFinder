@@ -38,18 +38,11 @@ CLOSEST_NODE_NUM = 3
 # DPTServer config
 # Timeout for peer requests
 SERVER_TIMEOUT = 3
-# Network info to send a long a request
-SERVER_ENDPOINT = PeerInfo(
-    PUBLIC_KEY,                      # public key as id
-    ipaddress.ip_address("0.0.0.0"), # ip address to bind
-    30303,                           # udp port to listen
-    30303                            # tcp port to listen
-)
 
 # DPT config
 # Interval for peer table refresh
 REFRESH_INTERVAL = 10
-MAX_DPT_PEERS = 2000
+MAX_DPT_PEERS = 1000
 
 BOOTNODES = [
     # Geth Bootnodes

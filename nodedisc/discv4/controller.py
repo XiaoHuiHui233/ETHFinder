@@ -67,7 +67,7 @@ logger.addHandler(fh)
 class ListenerV4(metaclass=ABCMeta):
     """
     """
-    async def bind(self, controller: "ControllerV4") -> None:
+    def bind(self, controller: "ControllerV4") -> None:
         self.controller = controller
 
     @abstractmethod
@@ -79,7 +79,8 @@ class ListenerV4(metaclass=ABCMeta):
         return NotImplemented
     
     @abstractmethod
-    async def on_find_neighbours(self, target: PublicKey) -> None:
+    async def on_find_neighbours(self, peer: PeerInfo,
+            target: PublicKey) -> None:
         return NotImplemented
     
     @abstractmethod
@@ -109,15 +110,23 @@ class ControllerV4(Controller):
 
     def register_listener(self, listener: ListenerV4) -> None:
         listener.bind(self)
+        self.listeners.append(listener)
 
     async def waiting_for_pong(self, ping_hash: bytes) -> None:
-        async with trio.move_on_after(self.ping_timeout) as cancel_scope:
+        if ping_hash not in self.requests:
+            return
+        with trio.move_on_after(self.ping_timeout) as cancel_scope:
             await self.requests[ping_hash][1].wait()
         if cancel_scope.cancelled_caught:
+            if ping_hash not in self.requests:
+                return
             if self.requests[ping_hash][1].is_set():
                 return
             for listener in self.listeners:
-                listener.on_ping_timeout(self.requests[ping_hash][0])
+                self.base_loop.start_soon(
+                    listener.on_ping_timeout,
+                    self.requests[ping_hash][0]
+                )
             self.requests.pop(ping_hash)
 
     async def ping(self, peer: PeerInfo) -> None:
@@ -141,6 +150,7 @@ class ControllerV4(Controller):
         # Ensure no ping packet sending in a second.
         if bytes_hash in self.requests:
             return
+        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port}.")
         await self.server.send(peer, bytes_data)
         event = Event()
         self.requests[bytes_hash] = (peer, event)
@@ -154,7 +164,8 @@ class ControllerV4(Controller):
         :param PublicKey target: The central node id.
         """
         msg = FindNeighboursMessage(self.private_key, target)
-        await self.send(peer, msg.to_bytes())
+        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port} ")
+        await self.server.send(peer, msg.to_bytes())
 
     async def neighbours(self, peer: PeerInfo, nodes: list[PeerInfo]) -> None:
         """Send a neighbours message packet to the designated peer.
@@ -163,11 +174,13 @@ class ControllerV4(Controller):
         :param list[PeerInfo] nodes: The neighbour peers.
         """
         msg = NeighboursMessage(self.private_key, nodes)
-        await self.send(peer, msg.to_bytes())
+        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port} ")
+        await self.server.send(peer, msg.to_bytes())
 
     async def enr_request(self, peer: PeerInfo) -> None:
         msg = ENRRequestMessage(self.private_key)
-        await self.send(peer, msg.to_bytes())
+        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port} ")
+        await self.server.send(peer, msg.to_bytes())
 
     async def on_message(self, data: bytes, address: tuple[str, int]) -> None:
         """Decode the received UDP packets and classify them for
@@ -196,13 +209,13 @@ class ControllerV4(Controller):
         try:
             bytes_hash, msg, public_key = MessageV4.unpack(data)
         except:
-            logger.warning(
+            logger.warn(
                 "Recieved a packet but couldn't parse successfully. "
-                f"From {ip}: {port}. Details: {traceback.format_exc()}"
+                f"From {rckey}. \nDetails: {traceback.format_exc()}"
             )
             return
         logger.info(
-            f"Received {msg} from {ip}:{port} (peerId: "
+            f"Received {msg} from {rckey} (peerId: "
             f"{public_key.to_bytes().hex()[:7]})"
         )
         # handle message
@@ -212,14 +225,16 @@ class ControllerV4(Controller):
                 port,
                 msg.from_peer.tcp_port
             )
+            new_msg = PongMessage(
+                self.private_key,
+                remote,
+                bytes_hash,
+                self.enr_seq
+            )
+            logger.info(f"Send {new_msg} to {rckey}")
             await self.server.send(
                 remote,
-                PongMessage(
-                    self.private_key,
-                    remote,
-                    bytes_hash,
-                    self.enr_seq
-                ).to_bytes()
+                new_msg.to_bytes()
             )
             for listener in self.listeners:
                 self.base_loop.start_soon(
@@ -230,7 +245,7 @@ class ControllerV4(Controller):
         elif isinstance(msg, PongMessage):
             if msg.ping_hash in self.requests:
                 self.requests[msg.ping_hash][1].set()
-                self.last_pong[rckey] = time.monotonic() 
+                self.last_pong[rckey] = time.monotonic()
                 for listener in self.listeners:
                     self.base_loop.start_soon(
                         listener.on_pong,
@@ -239,7 +254,7 @@ class ControllerV4(Controller):
                     )
                 self.requests.pop(msg.ping_hash)
             else:
-                logger.warning(
+                logger.warn(
                     f"Recieved a pong packet from {rckey}, "
                     "but no corresponding ping packet."
                 )
@@ -250,6 +265,11 @@ class ControllerV4(Controller):
             for listener in self.listeners:
                 self.base_loop.start_soon(
                     listener.on_find_neighbours,
+                    PeerInfo(
+                        ipaddress.ip_address(ip),
+                        port,
+                        0
+                    ),
                     msg.target
                 )
         elif isinstance(msg, NeighboursMessage):
@@ -262,17 +282,19 @@ class ControllerV4(Controller):
             if (rckey in self.last_pong 
                 and time.monotonic() - self.last_pong[rckey] > 43200):
                 return
+            new_msg = ENRResponseMessage(
+                self.private_key,
+                bytes_hash,
+                self.enr
+            )
+            logger.info(f"Send {new_msg} to {rckey}")
             await self.server.send(
                 PeerInfo(
                     ipaddress.ip_address(ip),
                     port,
                     0
                 ),
-                ENRResponseMessage(
-                    self.private_key,
-                    bytes_hash,
-                    self.enr
-                ).to_bytes()
+                new_msg.to_bytes()
             )
         elif isinstance(msg, ENRResponseMessage):
             for listener in self.listeners:

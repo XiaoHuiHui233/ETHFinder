@@ -34,6 +34,11 @@ See: https://github.com/ethereum/devp2p/blob/master/discv5/discv5.md
 __author__ = "XiaoHuiHui"
 __version__ = "2.1"
 
+import os
+
+if not os.path.exists("./logs/nodedisc"):
+    os.makedirs("./logs/nodedisc")
+
 from .dpt import DPT
 from .server import Server, Controller
 from .discv4.controller import ControllerV4, ListenerV4
