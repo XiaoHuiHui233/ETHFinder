@@ -1,25 +1,8 @@
-FROM python:3.8
-
-RUN mkdir -p /app
-
+FROM python:3.9
+COPY ./requirements.txt /app/
 WORKDIR /app
-
-ADD requirements.txt /app/
-
 RUN pip install -r requirements.txt
-
-ADD dpt /app/
-
-ADD rlpx /app/
-
-ADD __init__.py /app/
-
-ADD config.py /app/
-
-ADD controller.py /app/
-
-ADD main.py /app/
-
+COPY ./ /app
+EXPOSE 30303
 ENV PYTHONUNBUFFERED 0
-
-ENTRYPOINT ["python", "-u", "main.py"]
+ENTRYPOINT ["python", "-u", "tests/nodedisc_v4_test.py"]
