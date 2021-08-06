@@ -4,4 +4,4 @@ WORKDIR /app
 RUN pip install -r requirements.txt
 COPY ./ /app
 ENV PYTHONUNBUFFERED 0
-ENTRYPOINT ["python", "-u", "tests/nodedisc_v4_test.py"]
+ENTRYPOINT ["python", "-u", "main.py"]

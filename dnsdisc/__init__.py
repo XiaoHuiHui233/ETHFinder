@@ -12,6 +12,11 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 __author__ = "XiaoHuiHui"
 __version__ = "1.4"
 
+import os
+
+if not os.path.exists("./logs/dnsdisc"):
+    os.makedirs("./logs/dnsdisc")
+
 from . import dns
 from . import enr
 from .datatypes import PeerNetworkInfo

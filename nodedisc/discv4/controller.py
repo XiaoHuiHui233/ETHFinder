@@ -42,6 +42,7 @@ __version__ = "2.1"
 import traceback
 import time
 import logging
+from logging import FileHandler, Formatter
 import ipaddress
 from abc import ABCMeta, abstractmethod
 
@@ -57,8 +58,8 @@ from .messages import FindNeighboursMessage, NeighboursMessage
 from .messages import ENRRequestMessage, ENRResponseMessage
 
 logger = logging.getLogger("nodedisc.discv4")
-fh = logging.FileHandler("./logs/nodedisc/discv4.log")
-fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+fh = FileHandler("./logs/nodedisc/discv4.log", "w", encoding="utf-8")
+fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
 fh.setLevel(logging.INFO)
 logger.addHandler(fh)
@@ -123,10 +124,15 @@ class ControllerV4(Controller):
             if self.requests[ping_hash][1].is_set():
                 return
             for listener in self.listeners:
-                self.base_loop.start_soon(
-                    listener.on_ping_timeout,
-                    self.requests[ping_hash][0]
-                )
+                try:
+                    await listener.on_ping_timeout(
+                        self.requests[ping_hash][0]
+                    )
+                except Exception:
+                    logger.error(
+                        f"Error on calling on_ping_timeout to listener.\n"
+                        f"Detail: {traceback.format_exc()}"
+                    )
             self.requests.pop(ping_hash)
 
     async def ping(self, peer: PeerInfo) -> None:
@@ -208,7 +214,7 @@ class ControllerV4(Controller):
         rckey = f"{ip}:{port}"
         try:
             bytes_hash, msg, public_key = MessageV4.unpack(data)
-        except:
+        except Exception:
             logger.warn(
                 "Recieved a packet but couldn't parse successfully. "
                 f"From {rckey}. \nDetails: {traceback.format_exc()}"
@@ -237,11 +243,13 @@ class ControllerV4(Controller):
                 new_msg.to_bytes()
             )
             for listener in self.listeners:
-                self.base_loop.start_soon(
-                    listener.on_pong,
-                    remote,
-                    public_key
-                )
+                try:
+                    await listener.on_pong(remote, public_key)
+                except Exception:
+                    logger.error(
+                        f"Error on calling on_pong to listener.\n"
+                        f"Detail: {traceback.format_exc()}"
+                    )
         elif isinstance(msg, PongMessage):
             if msg.ping_hash in self.requests:
                 self.requests[msg.ping_hash][1].set()
@@ -263,21 +271,29 @@ class ControllerV4(Controller):
                 and time.monotonic() - self.last_pong[rckey] > 43200):
                 return
             for listener in self.listeners:
-                self.base_loop.start_soon(
-                    listener.on_find_neighbours,
-                    PeerInfo(
-                        ipaddress.ip_address(ip),
-                        port,
-                        0
-                    ),
-                    msg.target
-                )
+                try:
+                    await listener.on_find_neighbours(
+                        PeerInfo(
+                            ipaddress.ip_address(ip),
+                            port,
+                            0
+                        ),
+                        msg.target
+                    )
+                except Exception:
+                    logger.error(
+                        f"Error on calling on_find_neighbours to listener.\n"
+                        f"Detail: {traceback.format_exc()}"
+                    )
         elif isinstance(msg, NeighboursMessage):
             for listener in self.listeners:
-                self.base_loop.start_soon(
-                    listener.on_neighbours,
-                    msg.nodes
-                )
+                try:
+                    await listener.on_neighbours(msg.nodes)
+                except Exception:
+                    logger.error(
+                        f"Error on calling on_neighbours to listener.\n"
+                        f"Detail: {traceback.format_exc()}"
+                    )
         elif isinstance(msg, ENRRequestMessage):
             if (rckey in self.last_pong 
                 and time.monotonic() - self.last_pong[rckey] > 43200):
@@ -298,7 +314,10 @@ class ControllerV4(Controller):
             )
         elif isinstance(msg, ENRResponseMessage):
             for listener in self.listeners:
-                self.base_loop.start_soon(
-                    listener.on_enrresponse,
-                    msg.enr
-                )
+                try:
+                    await listener.on_enrresponse(msg.enr)
+                except Exception:
+                    logger.error(
+                        f"Error on calling on_enrresponse to listener.\n"
+                        f"Detail: {traceback.format_exc()}"
+                    )

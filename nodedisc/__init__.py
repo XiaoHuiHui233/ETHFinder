@@ -39,9 +39,17 @@ import os
 if not os.path.exists("./logs/nodedisc"):
     os.makedirs("./logs/nodedisc")
 
-from .dpt import DPT
-from .server import Server, Controller
+from .dpt import DPT, DPTListener
+from .server import UDPServer, Controller
 from .discv4.controller import ControllerV4, ListenerV4
 from .datatypes import PeerInfo
 
-__all__ = ["DPT", "Server", "Controller", "ControllerV4", "ListenerV4", "PeerInfo"]
+__all__ = [
+    "DPT",
+    "DPTListener",
+    "UDPServer",
+    "Controller",
+    "ControllerV4",
+    "ListenerV4",
+    "PeerInfo"
+]

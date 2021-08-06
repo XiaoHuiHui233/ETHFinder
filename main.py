@@ -7,18 +7,15 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-import ipaddress
+from multiprocessing import Process, Queue
 import logging
-from logging import FileHandler, Formatter, StreamHandler
 
 import trio
-from parse import parse
 from eth_keys.datatypes import PublicKey
 
-from dpt.dpt import DPT
-import config as opts
-from dpt.classes import PeerInfo
-from rlpx.rlpx import RLPx
+from core import NodeDiscCore, RLPxCore, EthCore
+from nodedisc import DPTListener, PeerInfo
+from rlpx import P2pListener, Protocol, Eth
 
 logging.basicConfig(
     format="%(asctime)s [%(name)s][%(levelname)s] %(message)s",
@@ -28,37 +25,53 @@ logging.basicConfig(
         # FileHandler("./server.log", "w")
     ]
 )
-logger = logging.getLogger("main")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh = FileHandler("./logs/server.log", "w")
-sh = StreamHandler()
-fh.setFormatter(fmt)
-sh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
-sh.setLevel(logging.INFO)
-logger.addHandler(fh)
-logger.addHandler(sh)
+
+class RLPxDPTListener(DPTListener):
+    """
+    """
+    def __init__(self, queue: Queue) -> None:
+        self.queue = queue
+
+    def on_add_peer(self, id: PublicKey, peer: PeerInfo) -> None:
+        try:
+            self.queue.put_nowait((id, peer))
+        except:
+            pass
+        
+    def on_remove_peer(self, id: PublicKey, peer: PeerInfo) -> None:
+        pass
 
 
-async def main():
+class MyP2pListener(P2pListener):
+    """
+    """
+    def __init__(self, core: EthCore) -> None:
+        self.core = core
+
+    def on_protocols(self, protocols: list[Protocol]) -> None:
+        for protocol in protocols:
+            if isinstance(protocol, Eth):
+                self.core.on_eth(protocol)
+
+
+queue = Queue(10000)
+
+def program1(queue: Queue) -> None:
+    node_core = NodeDiscCore()
+    node_core.dpt_register_listener(RLPxDPTListener(queue))
+    trio.run(node_core.bind)
+
+async def program2() -> None:
+    rlpx_core = RLPxCore(queue)
+    eth_core = EthCore()
+    rlpx_core.p2p_register_listener(MyP2pListener(eth_core))
     async with trio.open_nursery() as base_loop:
-        dpt = DPT(opts.PRIVATE_KEY, base_loop)
-        rlpx = RLPx(opts.PRIVATE_KEY, dpt, base_loop)
-        await dpt.server.bind()
-        base_loop.start_soon(rlpx.bind)
-        base_loop.start_soon(dpt.server.recv_loop)
-        base_loop.start_soon(dpt.refresh_loop)
-        base_loop.start_soon(rlpx.refill_loop)
-        for boot_node in opts.BOOTNODES:
-            id, ip, port = parse("enode://{}@{}:{}", boot_node)
-            peer = PeerInfo(
-                PublicKey(bytes.fromhex(id)),
-                ipaddress.ip_address(ip),
-                int(port),
-                int(port)
-            )
-            base_loop.start_soon(dpt.add_peer, peer)
-        from controller import eth_controller
-        await eth_controller.bind()
+        base_loop.start_soon(rlpx_core.bind)
+        base_loop.start_soon(eth_core.bind)
 
-trio.run(main)
+
+if __name__ == "__main__":
+    p1 = Process(target=program1, args=(queue,))
+    p1.start()
+    trio.run(program2)
+    p1.terminate()

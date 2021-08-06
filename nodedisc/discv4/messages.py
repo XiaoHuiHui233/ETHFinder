@@ -40,7 +40,7 @@ __author__ = "XiaoHuiHui"
 __version__ = "2.1"
 
 import time
-import ipaddress
+from ipaddress import IPv4Address, IPv6Address
 from typing import Union
 from abc import abstractmethod
 
@@ -51,7 +51,7 @@ from eth_hash.auto import keccak
 
 from ..datatypes import Message, PeerInfo
 
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+IPAddress = Union[IPv4Address, IPv6Address]
 RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 
@@ -60,7 +60,7 @@ def timestamp() -> bytes:
 
     :return bytes: UNIX timestamp converted to bytes.
     """
-    return int.to_bytes(int(time.time()) + 60, 4, "big")
+    return int(time.time()) + 60
 
 
 class MessageV4(Message):
@@ -191,7 +191,7 @@ class PingMessage(MessageV4):
             prefix specification.
         """
         return [
-            int.to_bytes(PingMessage.VERSION, 1, "big"),
+            PingMessage.VERSION,
             self.from_peer.to_RLP(),
             self.to_peer.to_RLP(),
             timestamp(),
@@ -214,7 +214,7 @@ class PingMessage(MessageV4):
             raise ValueError("The received ping packet has expired.")
         version = int.from_bytes(payload[0], byteorder="big")
         if version != PingMessage.VERSION:
-            raise ValueError("Ping message version is unsupported.")
+            raise ValueError(f"Ping message version {version} is unsupported.")
         if len(payload) >= 5:
             return cls(
                 None,

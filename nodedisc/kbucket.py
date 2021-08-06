@@ -27,7 +27,7 @@ import logging
 from logging import FileHandler, Formatter
 
 logger = logging.getLogger("nodedisc.kbucket")
-fh = FileHandler("./logs/nodedisc/kbucket.log")
+fh = FileHandler("./logs/nodedisc/kbucket.log", "w", encoding="utf-8")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
 fh.setLevel(logging.INFO)

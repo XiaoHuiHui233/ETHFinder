@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+# -*- codeing:utf-8 -*-
+
+"""A implemention of RLPx protocol.
+"""
+
+__author__ = "XiaoHuiHui"
+__version__ = "1.1"
+
 import os
 import random
 import struct
@@ -204,25 +213,15 @@ class ParseError(Exception):
 
 
 class ECIES:
-    def __init__(self, private_key: PrivateKey, id: PublicKey,
-            remote_id: PublicKey) -> None:
+    def __init__(self, private_key: PrivateKey, remote_id: PublicKey) -> None:
         self.private_key = private_key
-        self.public_key = id
+        self.public_key = private_key.public_key
         self.remote_pubkey = remote_id
         self.nonce = secrets.token_bytes(32)
         self.ephemeral_private_key = generate_privkey()
-        self.ephemeral_pubkey = \
-            KeyAPI().private_key_to_public_key(self.ephemeral_private_key)
+        self.ephemeral_pubkey = self.ephemeral_private_key.public_key
         self.got_EIP8_auth = False
         self.got_EIP8_ack = False
-        self.remote_init_msg = None
-        self.remote_nonce = None
-        self.ephemeral_shared_secret = None
-        self.init_msg = None
-        self.ingress_aes = None
-        self.egress_aes = None
-        self.ingress_mac = None
-        self.egress_mac = None
         self.body_size = None
 
     def parse_auth_plain(self, data: bytes,

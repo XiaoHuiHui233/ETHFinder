@@ -25,8 +25,8 @@ from eth_keys.datatypes import PublicKey
 from . import enr
 from .datatypes import PeerNetworkInfo
 
-logger = logging.getLogger("nodedisc.dnsdisc")
-fh = logging.FileHandler("./logs/nodedisc/dnsdisc.log")
+logger = logging.getLogger("dnsdisc.dns")
+fh = logging.FileHandler("./logs/dnsdisc/dns.log", "w", encoding="utf-8")
 fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
 fh.setLevel(logging.INFO)
@@ -138,7 +138,7 @@ def search(subdomain: str, context: Context) -> PeerNetworkInfo:
         elif (entry.startswith(enr.ROOT_PREFIX)):
             next = enr.parse_and_verify_root(entry, context.public_key)
             return search(next, context)
-    except:
+    except Exception:
         logger.error(
             f"Errored searching DNS tree at subdomain {subdomain}."
         )

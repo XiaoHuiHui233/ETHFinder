@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+# -*- codeing:utf-8 -*-
+
+"""
+"""
+
+__author__ = "XiaoHuiHui"
+__version__ = "1.1"
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from eth_hash.auto import keccak

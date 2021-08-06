@@ -18,22 +18,11 @@ __version__ = "2.1"
 
 import os
 
-if not os.path.exists("./logs/rlpx"):
-    os.makedirs("./logs/rlpx")
+if not os.path.exists("./logs/rlpx/protocols"):
+    os.makedirs("./logs/rlpx/protocols")
 
-from .peer import Peer, PeerHandler
-from .server import TCPListener, TCPServer
-from .protocols import Eth, EthHandler, P2p, P2pListener, Protocol, Capability
+from .datatypes import Capability
+from .eth import Eth, EthHandler
+from .p2p import P2p, P2pListener, Protocol
 
-__all__ = [
-    "Peer",
-    "PeerHandler",
-    "TCPListener",
-    "TCPServer",
-    "Eth",
-    "EthHandler",
-    "P2p",
-    "P2pListener",
-    "Protocol",
-    "Capability"
-]
+__all__ = ["Protocol", "Capability", "Eth", "EthHandler", "P2p", "P2pListener"]

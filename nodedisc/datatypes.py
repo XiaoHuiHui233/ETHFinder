@@ -8,12 +8,13 @@ __author__ = "XiaoHuiHui"
 __version__ = "2.3"
 
 import ipaddress
+from ipaddress import IPv4Address, IPv6Address
 from typing import Union
 from abc import ABCMeta, abstractmethod
 
 from dnsdisc import PeerNetworkInfo
 
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+IPAddress = Union[IPv4Address, IPv6Address]
 RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 
@@ -50,15 +51,15 @@ class PeerInfo:
     def to_RLP(self) -> RLP:
         if self.address.version == 4:
             return [
-                int.to_bytes(int(self.address), 4, "big", signed=False),
-                int.to_bytes(self.udp_port, 2, "big", signed=False),
-                int.to_bytes(self.tcp_port, 2, "big", signed=False)
+                int(self.address),
+                self.udp_port,
+                self.tcp_port
             ]
         elif self.address.version == 6:
             return [
-                int.to_bytes(int(self.address), 16, "big", signed=False),
-                int.to_bytes(self.udp_port, 2, "big", signed=False),
-                int.to_bytes(self.tcp_port, 2, "big", signed=False)
+                int(self.address),
+                self.udp_port,
+                self.tcp_port
             ]
         else:
             raise ValueError("Bad ip address version.")

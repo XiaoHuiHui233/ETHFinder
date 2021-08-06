@@ -13,7 +13,10 @@ __author__ = "XiaoHuiHui"
 __version__ = "2.1"
 
 import logging
+from logging import FileHandler, Formatter
 import time
+from abc import ABCMeta, abstractmethod
+import traceback
 
 from lru import LRU
 from eth_keys.datatypes import PrivateKey, PublicKey
@@ -25,28 +28,42 @@ from .kbucket import KademliaRoutingTable
 DIFF_TIME = 0.2
 
 logger = logging.getLogger("nodedisc.dpt")
-fh = logging.FileHandler("./logs/nodedisc/dpt.log")
-fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+fh = FileHandler("./logs/nodedisc/dpt.log", "w", encoding="utf-8")
+fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
 fh.setLevel(logging.INFO)
 logger.addHandler(fh)
 
 
+class DPTListener(metaclass=ABCMeta):
+    """
+    """
+    @abstractmethod
+    def on_add_peer(self, id: PublicKey, peer: PeerInfo) -> None:
+        return NotImplemented
+    
+    @abstractmethod
+    def on_remove_peer(self, id: PublicKey, peer: PeerInfo) -> None:
+        return NotImplemented
+    
+
 class DPT:
     """A class represents distributed peer table."""
 
     def __init__(self, private_key: PrivateKey, bucket_nodes: int,
-            num_buckets: int) -> None:
+            num_buckets: int, max_closest: int) -> None:
         self.private_key = private_key
         self.id = private_key.public_key
+        self.max_closest = max_closest
         logger.info(f"DPT running with node key: {self.id}")
         self.kbucket = KademliaRoutingTable(
             keccak(self.id.to_bytes()),
             bucket_nodes,
             num_buckets
         )
-        self.peers: dict[bytes, PeerInfo] = {}
+        self.peers: dict[bytes, tuple[PublicKey, PeerInfo]] = {}
         self.banlist: dict[PublicKey, float] = LRU(10000)
+        self.listeners: list[DPTListener] = []
 
     def __len__(self) -> int:
         return len(self.peers)
@@ -69,6 +86,9 @@ class DPT:
                     "but in peers dict!"
                 )
         return False
+
+    def register_listener(self, listener: DPTListener) -> None:
+        self.listeners.append(listener)
     
     def add_peer(self, peer: PeerInfo, id: PublicKey) -> None:
         """Add a peer to the DHT.
@@ -109,13 +129,20 @@ class DPT:
             return
         logger.info(f"Peer id {id.to_bytes().hex()[:7]} was added to DHT.")
         old = self.kbucket.update(id_hash)
-        self.peers[id_hash] = peer
+        self.peers[id_hash] = (id, peer)
+        for listener in self.listeners:
+            try:
+                listener.on_add_peer(id, peer)
+            except Exception:
+                logger.error(
+                    f"Error on calling on_add_peer to listener.\n"
+                    f"Detail: {traceback.format_exc()}"
+                )
         if old is None:
             return None
         else:
-            old_peer = self.peers[old]
-            self.peers.pop(old)
-            self.kbucket.remove(old)
+            id, old_peer = self.peers[old]
+            self.remove_peer(id)
             return old_peer
 
     def remove_peer(self, peer_id: PublicKey) -> None:
@@ -123,6 +150,9 @@ class DPT:
         
         :param PublicKey peer_id: The given id.
         """
+        if peer_id == self.id:
+            logger.warn(f"You can't remove self from DHT.")
+            return
         id_hash = keccak(peer_id.to_bytes())
         if id_hash in self.kbucket:
             self.kbucket.remove(id_hash)
@@ -131,6 +161,17 @@ class DPT:
                     f"Peer id {peer_id.to_bytes().hex()[:7]} "
                     "was removed from DHT."
                 )
+                for listener in self.listeners:
+                    try:
+                        listener.on_remove_peer(
+                            self.peers[id_hash][0],
+                            self.peers[id_hash][1]
+                        )
+                    except Exception:
+                        logger.error(
+                            f"Error on calling on_remove_peer to listener.\n"
+                            f"Detail: {traceback.format_exc()}"
+                        )
                 self.peers.pop(id_hash)
             else:
                 logger.warn(
@@ -148,8 +189,11 @@ class DPT:
         """Add a peer to the banned list.
 
         :param PublicKey peer_id: The public key of the peer to be
-            banned。
+            banned.
         """
+        if peer_id == self.id:
+            logger.warn(f"You can't ban self peer from DHT.")
+            return
         logger.info(f"Peer id {peer_id.to_bytes().hex()[:7]} was banned.")
         self.banlist[peer_id] = time.monotonic()
         self.remove_peer(peer_id)
@@ -161,7 +205,7 @@ class DPT:
         """
         id_hash = keccak(peer_id.to_bytes())
         if id_hash in self.peers:
-            return self.peers[id_hash]
+            return self.peers[id_hash][1]
         return None
 
     def get_peers(self) -> list[PeerInfo]:
@@ -169,10 +213,9 @@ class DPT:
 
         :return list[PeerInfo]: A list of peers.
         """
-        return [self.peers[i] for i in self.kbucket.list_all_random()]
+        return [self.peers[i][1] for i in self.kbucket.list_all_random()]
     
-    def get_closest_peers(self, id: PublicKey,
-            max_num: int) -> list[PeerInfo]:
+    def get_closest_peers(self, id: PublicKey) -> list[PeerInfo]:
         """Get the ids of the peers closest to the given id.
 
         :param PublicKey id: The given id.
@@ -180,8 +223,8 @@ class DPT:
         """
         id_hash = keccak(id.to_bytes())
         all_around = [
-            self.peers[i] for i in self.kbucket.list_nodes_around(id_hash)
+            self.peers[i][1] for i in self.kbucket.list_nodes_around(id_hash)
         ]
-        return all_around[:min(len(all_around), max_num)]
+        return all_around[:min(len(all_around), self.max_closest)]
 
     

@@ -9,3 +9,8 @@ services:
       - "./logs:/app/logs"
     ports:
       - "30303:30303"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: "30G"

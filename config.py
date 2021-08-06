@@ -8,42 +8,72 @@ __author__ = "XiaoHuiHui"
 __version__ = "1.0"
 
 import ipaddress
+from ipaddress import IPv4Address, IPv6Address
 import secrets
 import atexit
+import base64
+from typing import Union
 
-from eth_keys.datatypes import PrivateKey
 import ujson
+import rlp
+from eth_hash.auto import keccak
+from eth_keys import KeyAPI
+from eth_keys.datatypes import PrivateKey
 
-from rlpx.procotols.procotol import Capability
-from nodedisc.datatypes import PeerInfo
+from nodedisc import PeerInfo
+
+IPAddress = Union[IPv4Address, IPv6Address]
+
+
+def get_enr(enr_seq: int, ip: IPAddress, port: int,
+        private_key: PrivateKey) -> bytes:
+    content = [
+        int.to_bytes(enr_seq, 1, "big"),
+        b"id",
+        b"v4",
+        b"ip",
+        int.to_bytes(int(ip), 4, "big"),
+        b"secp256k1",
+        private_key.public_key.to_compressed_bytes(),
+        b"udp",
+        int.to_bytes(port, 2, "big", signed=False),
+    ]
+    raw_data = rlp.encode(content)
+    sig = KeyAPI().ecdsa_sign(keccak(raw_data), private_key)
+    record = [sig.to_bytes()] + content
+    data = rlp.encode(record)
+    b64 = base64.urlsafe_b64encode(data).rstrip(b"=")
+    return b"".join([b"enr:", b64])
 
 
 # Basic config
 PRIVATE_KEY = PrivateKey(secrets.token_bytes(32))
 # PRIVATE_KEY = KeyAPI.PrivateKey(bytes.fromhex("15b95cadffae45bb1cf7b8a7f643cbf1a6073ac588e57a88ae0cdb70c35d82fe"))
-PUBLIC_KEY = PRIVATE_KEY.public_key
-
+MY_PEER = PeerInfo(
+    ipaddress.ip_address("104.250.52.28"), # ip address
+    30303,                                 # udp port
+    30303                                  # tcp port
+)
+# DPT config
+NODES_PER_KBUCKET = 16
+NUM_ROUTING_TABLE_BUCKETS = 256
+CLOSEST_NODE_NUM = 3
+# UDP Server config
+LOCK_TIMEOUT = 3
+# ENR config
+ENR_SEQ = 1
+ENR = get_enr(ENR_SEQ, MY_PEER.address, MY_PEER.udp_port, PRIVATE_KEY)
+# Node Discovery config
+PING_TIMEOUT = 5
+REFRESH_INTERVAL = 10
+DIFFER_TIME = 0.1
 # DNS Discovery
 # EIP-1459 ENR tree urls to query for peer discovery
 DNS_NETWORKS = [
 	"enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net"
 ]
 MAX_DNS_PEERS = 200
-
-# KBucket config
-NODES_PER_KBUCKET = 16
-NUM_ROUTING_TABLE_BUCKETS = 256
-CLOSEST_NODE_NUM = 3
-
-# DPTServer config
-# Timeout for peer requests
-SERVER_TIMEOUT = 3
-
-# DPT config
-# Interval for peer table refresh
-REFRESH_INTERVAL = 10
-MAX_DPT_PEERS = 1000
-
+# NodeDisc boot nodes
 BOOTNODES = [
     # Geth Bootnodes
     # from https:#github.com/ethereum/go-ethereum/blob/1bed5afd92c22a5001aff01620671caccd94a6f8/params/bootnodes.go#L22
@@ -56,32 +86,31 @@ BOOTNODES = [
 	"enode://715171f50508aba88aecd1250af392a45a330af91d7b90701c436b618c86aaa1589c9184561907bebbb56439b8f8787bc01f49a7c77276c58c1b09822d75e8e8@52.231.165.108:30303",  # bootnode-azure-koreasouth-001
 	"enode://5d6d7cd20d6da4bb83a1d28cadb5d409b64edf314c0335df658c1a54e32c7c4a7ab7823d57c39b6a757556e68ff1df17c748b698544a55cb488b52479a92b60f@104.42.217.25:30303",   # bootnode-azure-westus-001
 ]
-
-# RLPx config
-RLPX_TIMEOUT = 10
+# RLPx network config
 MAX_PEERS = 500
+EIP8 = True
+RLPX_TIMEOUT = 5
+RLPX_LOCK_TIMEOUT = 3
+REFILL_INTERVALL = 10
+# RLPx protocol config
+RLPX_PROTOCOL_VERSION = 5
+RLPX_PROTOCOL_LENGTH = 16
+RLPX_PING_INTERVAL = 15
+RLPX_PING_TIMEOUT = 5
+RLPX_HELLO_TIMEOUT = 5
 CLIENT_ID = "Ethereum Finder (version: 1.0 beta) made by XiaoHuiHui using python3 and trio."
 REMOTE_ID_FILTER = []
-REFILL_INTERVALL = 10
-EIP8 = True
-CAPABILITIES = [
-    # Capability("eth", 62, 8),
-    Capability("eth", 63, 17),
-    Capability("eth", 64, 29),
-    Capability("eth", 65, 29),
-    # Capability("eth", 66, 29),
-]
-
-# ETH procotol config
-GENESIS_HASH = "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-# berlin hard fork
-HARD_FORK_BLOCK = 12244000
-HARD_FORK_HASH = "0eb440f6"
-# london is defined
+# Eth procotol config
+ETH_STATUS_TIMEOUT = 5
+NETWORK_ID = 1 # mainnet
+GENESIS_HASH = bytes.fromhex("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+HARD_FORK_BLOCK = 12965000 # london hard fork
+HARD_FORK_HASH = bytes.fromhex("b715077d")
 NEXT_FORK = 0
-# NEXT_FORK = 12965000
-# NEXT_FORK_HASH = "b715077d"
-
+# Eth parsing config
+PRINT_INTERVAL = 10
+MSG_TIMEOUT = 3
+# Now status
 NOW_HEIGHT = 0
 NOW_HASH = b""
 NOW_TD = 0
@@ -90,21 +119,3 @@ with open("./config.json", "r") as rf:
     NOW_HEIGHT = int(d["now"]["height"])
     NOW_HASH = bytes.fromhex(d["now"]["hash"])
     NOW_TD = int(d["now"]["td"])
-
-@atexit.register
-def save():
-    with open("./config.json", "w") as wf:
-        ujson.dump(
-            {
-                "now": {
-                    "height": str(NOW_HEIGHT),
-                    "hash": NOW_HASH.hex(),
-                    "td": str(NOW_TD)
-                }
-            },
-            wf,
-            ensure_ascii=False,
-            indent=4
-        )
-
-PROD_PORT = 18745
