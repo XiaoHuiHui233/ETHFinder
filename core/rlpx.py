@@ -56,7 +56,7 @@ class MyTCPListener(TCPListener):
 class RLPxCore:
     """
     """
-    def __init__(self, queue: Queue) -> None:
+    def __init__(self, channel: Queue) -> None:
         self.server = TCPServer(
             opts.PRIVATE_KEY,
             opts.MAX_PEERS,
@@ -65,7 +65,7 @@ class RLPxCore:
             opts.RLPX_LOCK_TIMEOUT
         )
         self.server.register_listener(MyTCPListener(self))
-        self.queue = queue
+        self.channel = channel
         self.p2p_listeners: list[P2pListener] = []
     
     def p2p_register_listener(self, listener: P2pListener) -> None:
@@ -81,17 +81,17 @@ class RLPxCore:
             )
             while True:
                 await trio.sleep(opts.REFILL_INTERVALL)
-                rlpx_loop.start_soon(self.refill)
+                await self.refill()
 
     async def refill(self) -> None:
         logger.info(
             f"Connection refill. "
             f"Peers: {len(self.server)}, "
-            f"Queue size: {self.queue.qsize()}."
+            f"Queue size: {self.channel.qsize()}."
         )
         while len(self.server) < opts.MAX_PEERS:
             try:
-                id, peer = self.queue.get_nowait()
+                id, peer = self.channel.get_nowait()
             except Exception:
                 break
             self.rlpx_loop.start_soon(

@@ -10,17 +10,16 @@ __version__ = "1.0"
 import ipaddress
 from ipaddress import IPv4Address, IPv6Address
 import secrets
-import atexit
 import base64
 from typing import Union
 
-import ujson
 import rlp
 from eth_hash.auto import keccak
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey
 
 from nodedisc import PeerInfo
+from store import block
 
 IPAddress = Union[IPv4Address, IPv6Address]
 
@@ -111,11 +110,17 @@ NEXT_FORK = 0
 PRINT_INTERVAL = 10
 MSG_TIMEOUT = 3
 # Now status
-NOW_HEIGHT = 0
-NOW_HASH = b""
-NOW_TD = 0
-with open("./config.json", "r") as rf:
-    d = ujson.load(rf)
-    NOW_HEIGHT = int(d["now"]["height"])
-    NOW_HASH = bytes.fromhex(d["now"]["hash"])
-    NOW_TD = int(d["now"]["td"])
+NOW_HEIGHT, NOW_HASH, NOW_TD = block.read_latest_block()
+# web client
+SERVICE_INTERVAL = 10
+POST_BLOCK_URLS = [
+    "http://172.17.0.1:8088/block",
+    "http://block_monitor:8893/block"
+]
+POST_TICK_URLS = [
+    "http://172.17.0.1:8088/balance",
+    "http://tick_server:8889/info"
+]
+# web service
+WEB_ADRESS = "0.0.0.0"
+WEB_PORT = 8089

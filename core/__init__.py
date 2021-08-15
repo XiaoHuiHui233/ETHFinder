@@ -15,5 +15,12 @@ if not os.path.exists("./logs/core"):
 from .nodedisc import NodeDiscCore
 from .rlpx import RLPxCore
 from .eth import EthCore
+from .service import StoreService, start_web_service
 
-__all__ = ["NodeDiscCore", "RLPxCore", "EthCore"]
+__all__ = [
+    "NodeDiscCore",
+    "RLPxCore",
+    "EthCore",
+    "StoreService",
+    "start_web_service"
+]

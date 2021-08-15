@@ -29,7 +29,7 @@ logger = logging.getLogger("dnsdisc.dns")
 fh = logging.FileHandler("./logs/dnsdisc/dns.log", "w", encoding="utf-8")
 fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.WARN)
 logger.addHandler(fh)
 
 dns_tree_cache: dict[str, str] = {}

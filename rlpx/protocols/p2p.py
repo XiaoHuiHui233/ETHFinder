@@ -27,7 +27,7 @@ logger = logging.getLogger("rlpx.protocols.p2p")
 fh = FileHandler("./logs/rlpx/protocols/p2p.log", "w", encoding="utf-8")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.WARN)
 logger.addHandler(fh)
 
 RLP = Union[list[list[bytes]], list[bytes], bytes]

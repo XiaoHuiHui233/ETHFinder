@@ -31,7 +31,7 @@ logger = logging.getLogger("nodedisc.dpt")
 fh = FileHandler("./logs/nodedisc/dpt.log", "w", encoding="utf-8")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.WARN)
 logger.addHandler(fh)
 
 

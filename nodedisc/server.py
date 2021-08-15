@@ -29,7 +29,7 @@ logger = logging.getLogger("nodedisc.server")
 fh = FileHandler("./logs/nodedisc/server.log", "w", encoding="utf-8")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.WARN)
 logger.addHandler(fh)
 
 class Controller(metaclass=ABCMeta):

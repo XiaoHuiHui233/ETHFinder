@@ -61,7 +61,7 @@ logger = logging.getLogger("nodedisc.discv4")
 fh = FileHandler("./logs/nodedisc/discv4.log", "w", encoding="utf-8")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.WARN)
 logger.addHandler(fh)
 
 

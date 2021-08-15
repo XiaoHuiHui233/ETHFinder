@@ -1,4 +1,6 @@
 import random
+import sys
+sys.path.append("./")
 
 from trickmath.tick import get_sqrt_ratio_at_tick, get_tick_at_sqrt_ratio, MIN_TICK, MAX_TICK
 from trickmath.position import burn
@@ -49,3 +51,8 @@ print(int.from_bytes(bytes.fromhex("00000000000000000000000000000000000000000000
 print(int.from_bytes(bytes.fromhex("00000000000000000000000000000000000051fa4af40d67c620c13caa45f01d"), byteorder='big', signed=True))
 print(int.from_bytes(bytes.fromhex("000000000000000000000000000000000000000000000000ff91fc0652a963da"), byteorder='big', signed=True))
 print(int.from_bytes(bytes.fromhex("0000000000000000000000000000000000000000000000000000000000030982"), byteorder='big', signed=True))
+
+for i in range(184200, 207200):
+    a = get_sqrt_ratio_at_tick(i) >> 96
+    b = get_sqrt_ratio_at_tick(i-1) >> 96
+    print( (a * a) / (b * b))

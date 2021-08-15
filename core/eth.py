@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+# -*- codeing:utf-8 -*-
+
+"""A implementation of core controller of eth protocol.
+"""
+
+__author__ = "XiaoHuiHui"
+__version__ = "1.5"
+
+
 from typing import Union
 import logging
 from logging import FileHandler, Formatter, StreamHandler
@@ -5,11 +15,9 @@ from collections import OrderedDict
 import random
 import uuid
 import time
-import traceback
+from multiprocessing import Queue
 
 import trio
-import ujson
-import requests
 import rlp
 from eth_hash.auto import keccak
 from lru import LRU
@@ -18,6 +26,7 @@ from rlpx import Eth, EthHandler
 from rlpx.protocols.eth import MESSAGE_CODES
 from utils import Promise
 from trickmath import burn
+from store import block
 import config as opts
 
 logger = logging.getLogger("core.eth")
@@ -41,15 +50,17 @@ CODE_PAIR = {
     MESSAGE_CODES.POOLED_TRANSACTIONS: MESSAGE_CODES.GET_POOLED_TRANSACTIONS
 }
 
+UNISWAP_V3_ADDRESS = bytes.fromhex("8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
+UNISWAP_V3_TOPIC = bytes.fromhex(
+    "c42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+)
+
 
 class MyEthHandler(EthHandler):
     """
     """
-    def __init__(self, core: "EthCore", eth: Eth) -> None:
-        eth.register_handler(self)
+    def __init__(self, core: "EthCore") -> None:
         self.core = core
-        self.rckey = self.eth.rckey
-        self.version = self.eth.version
         self.running = False
 
     def after_status(self) -> None:
@@ -93,21 +104,21 @@ class MyEthHandler(EthHandler):
             return None
 
     def handle_default(self, code: MESSAGE_CODES, payload: RLP) -> None:
-        logger.info(f"Recieve {code} from {self.rckey}.")
+        logger.info(f"receive {code} from {self.rckey}.")
         if self.version >= 66:
             id = int.from_bytes(payload[0], "big", signed=False)
             if id in self.promises:
                 self.promises[id].set(payload[1])
             else:
                 logger.warn(
-                    f"Recieve {code} from {self.rckey} but no promise."
+                    f"receive {code} from {self.rckey} but no promise."
                 )
         else:
             if code in self.promises:
                 self.promises[code].set(payload)
             else:
                 logger.warn(
-                    f"Recieve {code} from {self.rckey} but no promise."
+                    f"receive {code} from {self.rckey} but no promise."
                 )
     
     async def send_message(self, code: MESSAGE_CODES, data: RLP) -> bool:
@@ -115,7 +126,7 @@ class MyEthHandler(EthHandler):
     
     async def handle_message(self, code: MESSAGE_CODES, data: RLP) -> None:
         # logger.info(
-        #     f"{self.rckey}(version: {self.version}) recieved {code}."
+        #     f"{self.rckey}(version: {self.version}) received {code}."
         # )
         if code == MESSAGE_CODES.TX:
             await self.core.handle_new_tx(self.rckey, data)
@@ -126,7 +137,7 @@ class MyEthHandler(EthHandler):
         elif code == MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES:
             pass
         elif code == MESSAGE_CODES.GET_BLOCK_HEADERS:
-            logger.info(f"Recieve GET_BLOCK_HEADERS from {self.rckey}.")
+            logger.info(f"receive GET_BLOCK_HEADERS from {self.rckey}.")
             if self.version >= 66:
                 request_id = data[0]
                 headers = await self.core.get_headers(self.rckey, data[1])
@@ -138,7 +149,7 @@ class MyEthHandler(EthHandler):
                 headers = await self.core.get_headers(self.rckey, data)
                 await self.send_message(MESSAGE_CODES.BLOCK_HEADERS, headers)
         elif code == MESSAGE_CODES.GET_BLOCK_BODIES:
-            logger.info(f"Recieve GET_BLOCK_BODIES from {self.rckey}.")
+            logger.info(f"receive GET_BLOCK_BODIES from {self.rckey}.")
             if self.version >= 66:
                 request_id = data[0]
                 bodies = await self.core.get_bodies(self.rckey, data[1])
@@ -167,7 +178,8 @@ class MyEthHandler(EthHandler):
 
 
 class EthCore:
-    def __init__(self):
+    def __init__(self, channel: Queue) -> None:
+        self.channel = channel
         self.handlers: dict[str, MyEthHandler] = {}
         self.hash_to_height: dict[bytes, int] = {}
         self.block_header_cache: dict[int, RLP] = OrderedDict()
@@ -183,17 +195,21 @@ class EthCore:
             opts.HARD_FORK_HASH,
             opts.NEXT_FORK
         )
-        handler = MyEthHandler(self, eth)
+        handler = MyEthHandler(self)
+        eth.register_handler(handler)
         self.handlers[handler.rckey] = handler
 
-    async def bind(self):
+    async def bind(self) -> None:
         async with trio.open_nursery() as eth_loop:
             self.eth_loop = eth_loop
             eth_loop.start_soon(self.print_loop)
 
     async def print_loop(self) -> None:
         while True:
-            logger.info(f"Now {len(self.handlers)} handlers alive.")
+            logger.info(
+                f"Now {len(self.handlers)} handlers alive. "
+                f"Message queue: {self.channel.qsize()}"
+            )
             await trio.sleep(opts.PRINT_INTERVAL)
 
     def choose_one(self, rckey: str) -> str:
@@ -296,17 +312,17 @@ class EthCore:
         for block in payload:
             hash = block[0]
             number = int.from_bytes(block[1], "big")
-            logger.info(f"Recieved new block hash {number}.")
+            logger.info(f"received new block hash {number}.")
             headers = await self.send_get_headers(
                 rckey,
                 [hash, 1, 0, False]
             )
             if len(headers) == 0:
-                logger.warn(f"Recieved empty new headers from {rckey}.")
+                logger.warn(f"received empty new headers from {rckey}.")
                 return
             bodies = await self.send_get_bodies(rckey, [hash])
             if len(bodies) == 0:
-                logger.warn(f"Recieved empty new bodies from {rckey}.")
+                logger.warn(f"received empty new bodies from {rckey}.")
                 return
             await self.handle_new_block(
                 rckey,
@@ -331,167 +347,142 @@ class EthCore:
                         payload
                     )
 
-    def save(self) -> None:
-        try:
-            with open("./config.json", "w") as wf:
-                ujson.dump(
-                    {
-                        "now": {
-                            "height": str(opts.NOW_HEIGHT),
-                            "hash": opts.NOW_HASH.hex(),
-                            "td": str(opts.NOW_TD)
-                        }
-                    },
-                    wf,
-                    ensure_ascii=False,
-                    indent=4
-                )
-        except Exception:
-            logger.warn(f"Save new block to config failed!")
-
-    async def send_to_strategy(self, block_timestamp: int,
-            recieve_timestamp: int, hash: str, height: int, amount0: str,
-            amount1: str, sqrt_price: str, tick: int) -> None:
-        if height < self.last_reciept_block:
+    async def waiting_for_receipts(self, rckey: str, block_ts: int,
+            receive_ts: int, height: int, hash: bytes) -> None:
+        if height <= self.last_reciept_block:
             return
-        elif height == self.last_reciept_block:
-            if hash != self.last_reciept_block_hash:
-                # self.last_reciept_block = height
-                # self.last_reciept_block_hash = hash
-                pass
-            return
-        try:
-            r = requests.post(
-                "http://172.17.0.1:8088/balance",
-                ujson.dumps({
-                    "block_ts": block_timestamp,
-                    "timestamp": recieve_timestamp,
-                    "block_hash": hash,
-                    "block_id": height,
-                    "amount0": amount0,
-                    "amount1": amount1,
-                    "sqrt_price": sqrt_price,
-                    "tick_current": tick,
-                    "info": "eth_finder"
-                })
-            )
-            logger.info(
-                f"Post balance to strategy(HTTP {r.status_code})."
-            )
-        except Exception:
-            logger.error(
-                f"Error on post to strategy.\n"
-                f"Detail: {traceback.format_exc()}"
-            )
-            return
-        self.last_reciept_block = height
-        self.last_reciept_block_hash = hash
-
-    async def waiting_for_receipts(self, rckey: str, block_timestamp: int,
-            recieve_timestamp: int, height: int, payload: RLP) -> None:
         promise = await self.handlers[rckey].send_get_default(
             MESSAGE_CODES.RECEIPTS,
-            payload
+            [hash]
         )
         if promise is None:
             return
         with trio.move_on_after(opts.MSG_TIMEOUT) as cancel_scope:
             await promise.wait()
+        if height <= self.last_reciept_block:
+            return
         if cancel_scope.cancelled_caught and not promise.is_set():
             logger.warn(f"Waiting for receipts timeout from {rckey}.")
             return
-        receipts = promise.get_result()
-        if len(receipts) == 0:
-            logger.warn(f"Recieved empty receipts from {rckey}.")
+        result = promise.get_result()
+        if len(result) == 0:
+            logger.warn(f"received empty receipts from {rckey}.")
             return
-        for hash, receipt_list in zip(payload, receipts):
-            for receipt in receipt_list:
-                if isinstance(receipt, bytes):
-                    if receipt[0] >= 0x80:
-                        logger.warn(
-                            f"Error on the format of recieved receipt"
-                            f" from {rckey}."
-                        )
-                        continue
-                    typed_receipt = rlp.decode(receipt[1:])
-                    if receipt[0] == 0x01: # eip-2930
-                        logs = typed_receipt[3]
-                    elif receipt[0] == 0x02: # eip-1559
-                        logs = typed_receipt[3]
-                    else:
-                        logger.warn(
-                            f"Error on the type of recieved typed-receipt"
-                            f" from {rckey}."
-                        )
-                        continue
+        if len(result) > 1:
+            logger.warn(f"received too many receipts from {rckey}.")
+            return
+        receipts = result[0]
+        total_amount0 = 0
+        total_amount1 = 0
+        flag = False
+        for receipt in receipts:
+            if isinstance(receipt, bytes):
+                if receipt[0] >= 0x80:
+                    logger.warn(
+                        f"Error on the format of received receipt"
+                        f" from {rckey}."
+                    )
+                    continue
+                typed_receipt = rlp.decode(receipt[1:])
+                if receipt[0] == 0x01: # eip-2930
+                    logs = typed_receipt[3]
+                elif receipt[0] == 0x02: # eip-1559
+                    logs = typed_receipt[3]
                 else:
-                    logs = receipt[3]
-                for log in logs:
-                    if log[0] == bytes.fromhex(
-                            "8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
-                        ) and \
-                        log[1][0] == bytes.fromhex(
-                            "c42079f94a6350d7e6235f29174924f928cc2ac81"
-                            "8eb64fed8004e115fbcca67"
-                        ):
-                        sqrt_price = int.from_bytes(
-                            log[2][64:96],
-                            "big",
-                            signed=True
-                        )
-                        tick = int.from_bytes(
-                            log[2][128:160],
-                            "big",
-                            signed=True
-                        )
-                        my_amount0, my_amount1 = burn(
-                            195000,
-                            196620,
-                            4621219005768122 + 4270283529460521,
-                            sqrt_price,
-                            tick
-                        )
-                        logger.info(f"Sqrt price: {sqrt_price}, tick: {tick}")
-                        logger.info(
-                            f"Balance({height}): {my_amount0}, {my_amount1}"
-                        )
-                        await self.send_to_strategy(
-                            block_timestamp,
-                            recieve_timestamp,
-                            hash.hex(),
-                            height,
-                            str(my_amount0),
-                            str(my_amount1),
-                            str(sqrt_price),
-                            tick
-                        )
+                    logger.warn(
+                        f"Error on the type of received typed-receipt"
+                        f" from {rckey}."
+                    )
+                    continue
+            else:
+                logs = receipt[3]
+            for log in logs:
+                if log[0] != UNISWAP_V3_ADDRESS:
+                    continue
+                if log[1][0] != UNISWAP_V3_TOPIC:
+                    continue
+                amount0 = int.from_bytes(log[2][:32], "big", signed=True)
+                amount1 = int.from_bytes(log[2][32:64], "big", signed=True)
+                sqrt_price = int.from_bytes(log[2][64:96], "big", signed=True)
+                liquidity = int.from_bytes(log[2][96:128], "big", signed=True)
+                tick = int.from_bytes(log[2][128:160], "big", signed=True)
+                logger.info( "Found uniswap log.")
+                logger.info(f"Amount0: {amount0}, Amount1: {amount1}")
+                logger.info(f"Sqrt price: {sqrt_price}, tick: {tick}")
+                total_amount0 += amount0
+                total_amount1 += amount1
+                flag = True
+        if flag:
+            balance0, balance1 = burn(
+                195000,
+                196620,
+                4621219005768122 + 4270283529460521,
+                sqrt_price,
+                tick
+            )
+            logger.info(
+                f"Total amount({height}): {total_amount0}, {total_amount1}"
+            )
+            logger.info(f"Balance({height}): {balance0}, {balance1}")
+            try:
+                self.channel.put_nowait({
+                    "type": "uniswap",
+                    "block_ts": block_ts,
+                    "receive_ts": receive_ts,
+                    "hash": hash,
+                    "height": height,
+                    "balance0": balance0,
+                    "balance1": balance1,
+                    "amount0": total_amount0,
+                    "amount1": total_amount1,
+                    "sqrt_price": sqrt_price,
+                    "tick": tick
+                })
+            except Exception:
+                logger.warn("Failed to put uniswap signal to channel.")
+            self.last_reciept_block = height
+            self.last_reciept_block_hash = hash
     
     async def handle_new_block(self, rckey: str, payload: RLP,
             active: bool) -> None:
         new_height = int.from_bytes(payload[0][0][8], "big")
         new_td = int.from_bytes(payload[1], "big")
         new_hash = keccak(rlp.encode(payload[0][0]))
-        block_timestamp = int.from_bytes(payload[0][0][11], "big")
-        delta_time = time.time() - block_timestamp
-        logger.info(f"Recieved a block {new_height}(Timeout: {delta_time}s).")
+        block_ts = int.from_bytes(payload[0][0][11], "big")
+        receive_ts = int(time.time())
+        delta_time = receive_ts - block_ts
+        logger.info(f"received a block {new_height}(Timeout: {delta_time}s).")
         if rckey in self.handlers:
-            self.handlers[rckey].eth.base.peer.peer_loop.start_soon(
-                    self.waiting_for_receipts,
-                    rckey,
-                    block_timestamp,
-                    int(time.time()),
-                    new_height,
-                    [new_hash]
-                )
+            self.handlers[rckey].base_loop.start_soon(
+                self.waiting_for_receipts,
+                rckey,
+                block_ts,
+                receive_ts,
+                new_height,
+                new_hash
+            )
         if opts.NOW_HEIGHT < new_height:
-            if not active:
-                self.add_header_cache(new_height, payload[0][0])
-                self.add_body_cache(new_height, payload[0][1:])
             opts.NOW_HEIGHT = new_height
             opts.NOW_TD = new_td
             opts.NOW_HASH = new_hash
-            self.save()
+            block.write_latest_block(
+                opts.NOW_HEIGHT,
+                opts.NOW_HASH,
+                opts.NOW_TD
+            )
+            try:
+                self.channel.put_nowait({
+                    "type": "new_block",
+                    "block_ts": block_ts,
+                    "receive_ts": receive_ts,
+                    "height": new_height,
+                    "hash": new_hash
+                })
+            except Exception:
+                logger.warn("Failed to put new block signal to channel.")
             if not active:
+                self.add_header_cache(new_height, payload[0][0])
+                self.add_body_cache(new_height, payload[0][1:])
                 keys = list(self.handlers.keys())
                 samples = random.sample(keys, min(5, len(self.handlers)))
                 for key in samples:
@@ -503,10 +494,10 @@ class EthCore:
                             payload
                         )
         elif opts.NOW_HEIGHT == new_height and opts.NOW_HASH != new_hash:
-            logger.warn(f"Found a block conflict ({new_hash.hex()}).")
+            logger.info(f"Found a block conflict ({new_hash.hex()}).")
 
     async def handle_new_tx(self, rckey: str, payload: RLP) -> None:
-        # logger.info(f"Recieved a new tx.")
+        # logger.info(f"received a new tx.")
         keys = list(self.handlers.keys())
         samples = random.sample(keys, min(5, len(self.handlers)))
         for key in samples:
