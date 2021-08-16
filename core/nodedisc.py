@@ -20,6 +20,7 @@ from nodedisc import DPT, DPTListener, UDPServer, ControllerV4, ListenerV4
 from nodedisc import PeerInfo
 from dnsdisc import dns
 import config as opts
+from store import peer as peer_store
 
 logger = logging.getLogger("core.nodedisc")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
@@ -109,6 +110,14 @@ class NodeDiscCore:
     async def bootstrap(self, bootnodes: list[str]) -> None:
         for boot_node in bootnodes:
             id, ip, port = parse("enode://{}@{}:{}", boot_node)
+            peer = PeerInfo(
+                ipaddress.ip_address(ip),
+                int(port),
+                int(port)
+            )
+            await self.controller_v4.ping(peer)
+            await trio.sleep(opts.DIFFER_TIME)
+        for ip, port in peer_store.read_peers():
             peer = PeerInfo(
                 ipaddress.ip_address(ip),
                 int(port),

@@ -26,7 +26,7 @@ from rlpx import Eth, EthHandler
 from rlpx.protocols.eth import MESSAGE_CODES
 from utils import Promise
 from trickmath import burn
-from store import block
+from store import block, peer
 import config as opts
 
 logger = logging.getLogger("core.eth")
@@ -210,6 +210,15 @@ class EthCore:
                 f"Now {len(self.handlers)} handlers alive. "
                 f"Message queue: {self.channel.qsize()}"
             )
+            sample = random.sample(
+                list(self.handlers.keys()),
+                min(len(self.handlers), 50)
+            )
+            cache = []
+            for rckey in sample:
+                if self.handlers[rckey].running:
+                    cache.append(rckey)
+            peer.write_peers(cache)
             await trio.sleep(opts.PRINT_INTERVAL)
 
     def choose_one(self, rckey: str) -> str:
@@ -351,6 +360,8 @@ class EthCore:
             receive_ts: int, height: int, hash: bytes) -> None:
         if height <= self.last_reciept_block:
             return
+        if rckey not in self.handlers:
+            return
         promise = await self.handlers[rckey].send_get_default(
             MESSAGE_CODES.RECEIPTS,
             [hash]
@@ -436,6 +447,7 @@ class EthCore:
                     "amount0": total_amount0,
                     "amount1": total_amount1,
                     "sqrt_price": sqrt_price,
+                    "liquidity": liquidity,
                     "tick": tick
                 })
             except Exception:

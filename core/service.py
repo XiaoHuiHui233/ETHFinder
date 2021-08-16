@@ -43,6 +43,7 @@ block_id = d["block_id"]
 block_hash = bytes.fromhex(d["block_hash"])
 sqrt_price = int(d["sqrt_price"])
 latest_tick = d["tick"]
+liquidity = int(d["liquidity"])
 
 
 class StoreService:
@@ -88,6 +89,7 @@ class StoreService:
                             "block_id": datas["height"],
                             "block_hash": datas["hash"].hex(),
                             "sqrt_price": f"0x{sqrt_price:x}",
+                            "liquidity": f"0x{liquidity:x}",
                             "tick_current": latest_tick,
                             "info": "eth_finder"
                         }
@@ -103,13 +105,14 @@ class StoreService:
 
     async def handle_uniswap(self, datas: dict[str, Any]) -> None:
         global receive_ts, block_ts, block_id, block_hash
-        global sqrt_price, latest_tick
+        global sqrt_price, latest_tick, liquidity
         receive_ts = datas["receive_ts"]
         block_ts = datas["block_ts"]
         block_id = datas["height"]
         block_hash = datas["hash"]
         sqrt_price = datas["sqrt_price"]
         latest_tick = datas["tick"]
+        liquidity = datas["liquidity"]
         tick.write_latest_tick(
             {
                 "receive_ts": receive_ts,
@@ -117,7 +120,9 @@ class StoreService:
                 "block_id": block_id,
                 "block_hash": block_hash.hex(),
                 "sqrt_price": str(sqrt_price),
-                "tick": latest_tick
+                "liquidity": str(liquidity),
+                "tick": latest_tick,
+                "info": "eth_finder"
             }
         )
         balance0 = Decimal(datas["balance0"]) / Decimal("1000000")
@@ -140,6 +145,7 @@ class StoreService:
                             "tick_current": datas["tick"],
                             "ex_amount": str(abs(amount0)),
                             "ex_price": str(abs(amount0 / amount1)),
+                            "liquidity": f"0x{datas['liquidity']:x}",
                             "info": "eth_finder"
                         }
                     )

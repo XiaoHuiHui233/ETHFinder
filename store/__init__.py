@@ -7,6 +7,6 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from . import block, tick
+from . import block, tick, peer
 
-__all__ = ["block", "tick"]
+__all__ = ["block", "tick", "peer"]
