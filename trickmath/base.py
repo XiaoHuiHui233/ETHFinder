@@ -17,8 +17,6 @@ def mul_div(a: int, b: int, denominator: int) -> int:
     # but to ensure bit trick have the same result as
     # directly calculate, we should have a check
     if(prod0 != standard_prod0 or prod1 != standard_prod1):
-        print(prod0, standard_prod0)
-        print(prod1, standard_prod1)
         raise ValueError('trick error!')
 
     # Handle non-overflow cases, 256 by 256 division
@@ -90,8 +88,5 @@ def mul_div_rounding_up(a: int, b: int, denominator: int) -> int:
         if result >= 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:
             raise ValueError()
         result += 1
-
-
-def div_rounding_up(x: int, y: int) -> int:
-    return x // y + (1 if x % y > 0 else 0)
+    return result
 

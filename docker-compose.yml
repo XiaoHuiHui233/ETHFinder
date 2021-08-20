@@ -5,8 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - "./datas:/app/datas"
-      - "./logs:/app/logs"
+      - "/disk/ETHFinder/datas:/app/datas"
+      - "/disk/ETHFinder/logs:/app/logs"
     ports:
       - "30303:30303"
       - "8089:8089"

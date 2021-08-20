@@ -117,14 +117,8 @@ class NodeDiscCore:
             )
             await self.controller_v4.ping(peer)
             await trio.sleep(opts.DIFFER_TIME)
-        for ip, port in peer_store.read_peers():
-            peer = PeerInfo(
-                ipaddress.ip_address(ip),
-                int(port),
-                int(port)
-            )
-            await self.controller_v4.ping(peer)
-            await trio.sleep(opts.DIFFER_TIME)
+        await self.refresh_known_node()
+        await self.query_dns_nodes(opts.DNS_NETWORKS)
 
     async def alive_check(self) -> None:
         for peer in self.dpt.get_peers():
@@ -141,6 +135,16 @@ class NodeDiscCore:
                 await self.controller_v4.ping(PeerInfo.remake(peer))
                 await trio.sleep(opts.DIFFER_TIME)
 
+    async def refresh_known_node(self) -> None:
+        for ip, port in peer_store.read_peers():
+            peer = PeerInfo(
+                ipaddress.ip_address(ip),
+                int(port),
+                int(port)
+            )
+            await self.controller_v4.ping(peer)
+            await trio.sleep(opts.DIFFER_TIME)
+
     async def refresh(self) -> None:
         peers = self.dpt.get_peers()
         logger.info(
@@ -154,16 +158,17 @@ class NodeDiscCore:
             await trio.sleep(opts.DIFFER_TIME)
 
     async def refresh_loop(self) -> None:
-        cnt = 0
         async with trio.open_nursery() as refresh_loop:
+            cnt = 0
             while True:
+                await trio.sleep(opts.REFRESH_INTERVAL)
                 refresh_loop.start_soon(self.refresh)
-                if cnt == 0:
+                cnt += 1
+                if cnt % 6 == 0:
+                    cnt = 0
                     refresh_loop.start_soon(self.alive_check)
+                    refresh_loop.start_soon(self.refresh_known_node)
                     refresh_loop.start_soon(
                         self.query_dns_nodes,
                         opts.DNS_NETWORKS
                     )
-                cnt += 1
-                cnt %= 6
-                await trio.sleep(opts.REFRESH_INTERVAL)

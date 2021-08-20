@@ -1,7 +1,7 @@
 from typing import Tuple
 
-from trickmath.tick import get_sqrt_ratio_at_tick
-from trickmath.sqrtprice import get_amount0_delta_with_signed, get_amount1_delta_with_signed
+from .tick import get_sqrt_ratio_at_tick
+from .sqrtprice import get_amount0_delta_with_signed, get_amount1_delta_with_signed
 
 
 def modify_position(tick_lower: int, tick_upper: int, liquidity_delta: int, sqrt_price_X96: int, tick: int) -> Tuple[int, int]:

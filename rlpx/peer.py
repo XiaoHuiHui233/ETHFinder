@@ -77,6 +77,7 @@ class Peer:
         self.state = STATE.AUTH
         self.next_packet_size = 307
         self.has_auth = Event()
+        self.is_auth = False
         self.send_lock = StrictFIFOLock()
 
     async def bind(self, active: bool) -> None:
@@ -134,7 +135,7 @@ class Peer:
         if not self.running:
             return
         self.running = False
-        if self.has_auth.is_set():  
+        if self.is_auth:  
             for handler in self.handlers:
                 try:
                     await handler.disconnection()
@@ -209,6 +210,8 @@ class Peer:
             f"Send ack (EIP8: {self.ecies_session.got_EIP8_auth}) to "
             f"{self.rckey}."
         )
+        if result:
+            self.is_auth = True
         return result
 
     async def send_auth(self) -> bool:
@@ -243,6 +246,7 @@ class Peer:
             logger.info(f"Received ack (EIP8) from {self.rckey}.")
         self.socket_data = self.socket_data[self.next_packet_size:]
         self.has_auth.set()
+        self.is_auth = True
         for handler in self.handlers:
             try:
                 await handler.successful_authentication()
