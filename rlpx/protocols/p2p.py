@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implemention of RLPx protocol.
 """
 
@@ -36,17 +35,18 @@ RLP = Union[list[list[bytes]], list[bytes], bytes]
 class Protocol(metaclass=ABCMeta):
     """
     """
-    
+
     rel: dict[Capability, type["Protocol"]] = {}
 
-    def __init__(self, base: "P2p", capability: Capability,
-            offset: int) -> None:
+    def __init__(
+        self, base: "P2p", capability: Capability, offset: int
+    ) -> None:
         self.base = base
         self.name = capability.name
         self.version = capability.version
         self.length = capability.length
         self.offset = offset
-    
+
     def __str__(self) -> str:
         return f"{self.name}, {self.version}, {self.length}, {self.offset}"
 
@@ -61,15 +61,17 @@ class Protocol(metaclass=ABCMeta):
     @abstractmethod
     async def disconnect(self) -> None:
         return NotImplemented
-    
+
     @classmethod
-    def register(cls, capability: Capability,
-            protocol: type["Protocol"]) -> None:
+    def register(
+        cls, capability: Capability, protocol: type["Protocol"]
+    ) -> None:
         cls.rel[capability] = protocol
 
     @classmethod
-    def generate(cls, base: "P2p", capability: Capability,
-            offset: int) -> "Protocol":
+    def generate(
+        cls, base: "P2p", capability: Capability, offset: int
+    ) -> "Protocol":
         return cls.rel[capability](base, capability, offset)
 
 
@@ -99,8 +101,14 @@ class DISCONNECT_REASONS(Enum):
 class HelloMessage:
     """
     """
-    def __init__(self, protocol_version: int, client_id: str,
-            capabilities: list[Capability], port: int, id: PublicKey) -> None:
+    def __init__(
+        self,
+        protocol_version: int,
+        client_id: str,
+        capabilities: list[Capability],
+        port: int,
+        id: PublicKey
+    ) -> None:
         self.protocol_version = protocol_version
         self.client_id = client_id
         self.capabilities = capabilities
@@ -114,27 +122,24 @@ class HelloMessage:
             payload[1].decode(),
             [
                 Capability(
-                    i[0].decode(),
-                    int.from_bytes(i[1], byteorder="big"),
-                    0
+                    i[0].decode(), int.from_bytes(i[1], byteorder="big"), 0
                 ) for i in payload[2]
             ],
             int.from_bytes(payload[3], byteorder="big"),
             PublicKey(payload[4]),
         )
-    
+
     def to_RLP(self) -> RLP:
         return [
             self.protocol_version,
             self.client_id,
             [
-                capability.to_RLP() \
-                    for capability in self.capabilities
+                capability.to_RLP() for capability in self.capabilities
             ],
             self.port,
             self.id.to_bytes(),
         ]
-    
+
     def __str__(self) -> str:
         return "Hello Message: [\n" \
             f"    Protocol Version: {self.protocol_version}\n" \
@@ -142,8 +147,7 @@ class HelloMessage:
             "    Capabilities: [\n" + \
             "".join(
                 [
-                    f"        {capability}\n" \
-                        for capability in self.capabilities
+                    f"        {cap}\n" for cap in self.capabilities
                 ]
             ) + \
             f"    ]\n    Port: {self.port}\n" \
@@ -161,11 +165,17 @@ class P2pListener(metaclass=ABCMeta):
 class P2p(PeerHandler):
     """
     """
-
-    def __init__(self, protocol_version: int, protocol_length: int,
-            client_id: str, port: int, remote_id_filter: list[str],
-            ping_interval: int, ping_timeout: int,
-            hello_timeout: int) -> None:
+    def __init__(
+        self,
+        protocol_version: int,
+        protocol_length: int,
+        client_id: str,
+        port: int,
+        remote_id_filter: list[str],
+        ping_interval: int,
+        ping_timeout: int,
+        hello_timeout: int
+    ) -> None:
         self.protocol_version = protocol_version
         self.protocol_length = protocol_length
         self.client_id = client_id
@@ -187,7 +197,7 @@ class P2p(PeerHandler):
     async def successful_authentication(self) -> None:
         self.rckey = self.peer.rckey
         await self.send_hello()
-    
+
     async def disconnection(self) -> None:
         for protocol in self.protocols:
             try:
@@ -203,18 +213,17 @@ class P2p(PeerHandler):
     async def send_message(self, code: int, payload: RLP) -> bool:
         if self.compress:
             return await self.peer.send_message(
-                rlp.encode(code),
-                snappy.compress(rlp.encode(payload))
+                rlp.encode(code), snappy.compress(rlp.encode(payload))
             )
         else:
             return await self.peer.send_message(
-                rlp.encode(code),
-                rlp.encode(payload)
+                rlp.encode(code), rlp.encode(payload)
             )
-            
-    
-    async def send_disconnect(self, reason: DISCONNECT_REASONS = \
-            DISCONNECT_REASONS.DISCONNECT_REQUESTED) -> None:
+
+    async def send_disconnect(
+        self,
+        reason: DISCONNECT_REASONS = DISCONNECT_REASONS.DISCONNECT_REQUESTED
+    ) -> None:
         logger.info(
             f"Send DISCONNECT to {self.peer.rckey} (reason: {reason})."
         )
@@ -229,12 +238,9 @@ class P2p(PeerHandler):
         if cancel_scope.cancelled_caught:
             if self.hello_event.is_set():
                 return
-            logger.warn(
-                f"Recieved hello message timeout from {self.rckey}."
-            )
+            logger.warn(f"Recieved hello message timeout from {self.rckey}.")
             await self.send_disconnect(DISCONNECT_REASONS.TIMEOUT)
-        
-        
+
     async def send_hello(self) -> None:
         logger.info(f"Send HELLO to {self.rckey}.")
         self.we_hello = HelloMessage(
@@ -245,18 +251,17 @@ class P2p(PeerHandler):
             self.peer.id
         )
         await self.send_message(
-            BASE_PREFIXES.HELLO.value,
-            self.we_hello.to_RLP()
+            BASE_PREFIXES.HELLO.value, self.we_hello.to_RLP()
         )
         self.peer.peer_loop.start_soon(self.waiting_for_hello)
-    
+
     def get_protocol(self, code: int) -> Protocol:
         for protocol in self.protocols:
-            if code >= protocol.offset \
-                and code < protocol.offset + protocol.length:
+            if code >= protocol.offset and \
+                    code < protocol.offset + protocol.length:
                 return protocol
         return None
-    
+
     async def handle_message(self, body: bytes) -> None:
         code = body[0]
         if code == 0x80:
@@ -281,9 +286,7 @@ class P2p(PeerHandler):
             elif code == BASE_PREFIXES.DISCONNECT:
                 await self.handle_disconnect(payload)
             elif not self.hello_event.is_set():
-                logger.warn(
-                    f"Never recieved hello message from {self.rckey}."
-                )
+                logger.warn(f"Never recieved hello message from {self.rckey}.")
             elif code == BASE_PREFIXES.PING:
                 await self.handle_ping()
             elif code == BASE_PREFIXES.PONG:
@@ -291,9 +294,7 @@ class P2p(PeerHandler):
         else:
             protocol = self.get_protocol(code)
             if protocol is None:
-                logger.warn(
-                    f"No suitable protocol from {self.rckey}."
-                )
+                logger.warn(f"No suitable protocol from {self.rckey}.")
                 await self.send_disconnect(DISCONNECT_REASONS.PROTOCOL_ERROR)
             else:
                 code -= protocol.offset
@@ -309,7 +310,7 @@ class P2p(PeerHandler):
                     f"Error on calling after_hello from {self.rckey} to "
                     f"protocol.\nDetails: {traceback.format_exc()}"
                 )
-        
+
     async def handle_hello(self, payload: RLP) -> None:
         self.hello_event.set()
         logger.info(f"Recieved HELLO from {self.rckey}.")
@@ -336,8 +337,8 @@ class P2p(PeerHandler):
             for my_capability in self.capabilities:
                 if my_capability != his_capability:
                     continue
-                if my_capability.name in shared \
-                    and shared[my_capability.name] > my_capability:
+                if my_capability.name in shared and \
+                        shared[my_capability.name] > my_capability:
                     continue
                 shared[my_capability.name] = my_capability
         offset = self.protocol_length
@@ -351,10 +352,8 @@ class P2p(PeerHandler):
             )
             self.protocols.append(protocol)
             offset += capability.length
-        if len(self.protocols) == 0:
-            logger.warn(
-                f"No suitable protocol from {self.rckey}."
-            )
+        if not self.protocols:
+            logger.warn(f"No suitable protocol from {self.rckey}.")
             await self.send_disconnect(DISCONNECT_REASONS.USELESS_PEER)
             return
         for listener in self.listeners:
@@ -365,9 +364,11 @@ class P2p(PeerHandler):
                     f"Error on calling on_protocols from {self.rckey} to"
                     f" listener.\nDetail: {traceback.format_exc()}"
                 )
-        logger.info(f"Successfully connected to {self.rckey}({hello.client_id}).")
+        logger.info(
+            f"Successfully connected to {self.rckey}({hello.client_id})."
+        )
         await self.after_hello()
-    
+
     async def handle_disconnect(self, payload: RLP) -> None:
         self.disconnect = True
         code = int.from_bytes(payload[0], byteorder="big")
@@ -396,9 +397,7 @@ class P2p(PeerHandler):
         if cancel_scope.cancelled_caught:
             if self.ping_event.is_set():
                 return
-            logger.warn(
-                f"Recieved pong timeout from {self.rckey}."
-            )
+            logger.warn(f"Recieved pong timeout from {self.rckey}.")
             await self.send_disconnect(DISCONNECT_REASONS.TIMEOUT)
 
     async def send_ping(self) -> None:

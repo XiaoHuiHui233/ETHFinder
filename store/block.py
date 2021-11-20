@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of block data store module.
 """
 
@@ -24,9 +23,7 @@ def write_latest_block(height: int, hash: bytes, td: int) -> None:
         ujson.dump(
             {
                 "now": {
-                    "height": height,
-                    "hash": hash.hex(),
-                    "td": str(td)
+                    "height": height, "hash": hash.hex(), "td": str(td)
                 }
             },
             wf,

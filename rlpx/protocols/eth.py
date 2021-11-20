@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implemention of RLPx protocol.
 """
 
@@ -61,17 +60,22 @@ class MESSAGE_CODES(Enum):
 class Status:
     """
     """
-
-    def __init__(self, version: int, network_id: int, td: int,
-            best_hash: bytes, genesis_hash: bytes,
-            fork_id: tuple[bytes, int] = None) -> None:
+    def __init__(
+        self,
+        version: int,
+        network_id: int,
+        td: int,
+        best_hash: bytes,
+        genesis_hash: bytes,
+        fork_id: tuple[bytes, int] = None
+    ) -> None:
         self.version = version
         self.network_id = network_id
         self.td = td
         self.best_hash = best_hash
         self.genesis_hash = genesis_hash
         self.fork_id = fork_id
-    
+
     @classmethod
     def from_RLP(cls, payload: RLP, is_eth64: bool) -> "Status":
         if is_eth64:
@@ -80,8 +84,7 @@ class Status:
                 int.from_bytes(payload[1], byteorder="big"),
                 int.from_bytes(payload[2], byteorder="big"),
                 payload[3],
-                payload[4],
-                (
+                payload[4], (
                     payload[5][0],
                     int.from_bytes(payload[5][1], byteorder="big")
                 )
@@ -94,7 +97,7 @@ class Status:
                 payload[3],
                 payload[4]
             )
-    
+
     def to_RLP(self) -> RLP:
         if self.fork_id is None:
             return [
@@ -110,13 +113,9 @@ class Status:
                 self.network_id,
                 self.td,
                 self.best_hash,
-                self.genesis_hash,
-                [
-                    self.fork_id[0],
-                    self.fork_id[1]
-                ]
+                self.genesis_hash, [self.fork_id[0], self.fork_id[1]]
             ]
-    
+
     def __str__(self) -> str:
         s = "STATUS MESSAGE: [\n" \
             f"    V:{self.version},\n    NID:{self.network_id},\n" \
@@ -141,11 +140,11 @@ class EthHandler(metaclass=ABCMeta):
     @abstractmethod
     def after_status(self) -> None:
         return NotImplemented
-    
+
     @abstractmethod
     async def handle_message(self, code: MESSAGE_CODES, data: RLP) -> None:
         return NotImplemented
-    
+
     @abstractmethod
     async def disconnect(self) -> None:
         return NotImplemented
@@ -154,9 +153,7 @@ class EthHandler(metaclass=ABCMeta):
 class Eth(Protocol):
     """
     """
-
-    def __init__(self, base: P2p, capability: Capability,
-            offset: int) -> None:
+    def __init__(self, base: P2p, capability: Capability, offset: int) -> None:
         super().__init__(base, capability, offset)
         self.rckey = base.rckey
         self.status_event = Event()
@@ -166,16 +163,21 @@ class Eth(Protocol):
         handler.bind(self)
         self.handlers.append(handler)
 
-    def bind(self, status_timeout: int, network_id: int, genesis_hash: bytes,
-            hard_fork_hash: bytes, next_fork: int) -> None:
+    def bind(
+        self,
+        status_timeout: int,
+        network_id: int,
+        genesis_hash: bytes,
+        hard_fork_hash: bytes,
+        next_fork: int
+    ) -> None:
         if self.version >= 64:
             self.status = Status(
                 self.version,
                 network_id,
                 opts.NOW_TD,
                 opts.NOW_HASH,
-                genesis_hash,
-                (hard_fork_hash, next_fork)
+                genesis_hash, (hard_fork_hash, next_fork)
             )
             self.hard_fork_hash = hard_fork_hash
             self.next_fork = next_fork
@@ -195,9 +197,7 @@ class Eth(Protocol):
         if cancel_scope.cancelled_caught:
             if self.status_event.is_set():
                 return
-            logger.warn(
-               f"Recieved status message timeout from {self.rckey}"
-            )
+            logger.warn(f"Recieved status message timeout from {self.rckey}")
             await self.base.send_disconnect(DISCONNECT_REASONS.TIMEOUT)
 
     async def after_hello(self) -> None:
@@ -216,34 +216,37 @@ class Eth(Protocol):
 
     async def handle_message(self, code: int, payload: RLP) -> None:
         code = MESSAGE_CODES(code)
-        if code not in [MESSAGE_CODES.TX,
-                        MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES
-                        ]:
-            logger.info(
-                f"Received {code} from {self.rckey}."
-            )
+        if code not in [
+            MESSAGE_CODES.TX, MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES
+        ]:
+            logger.info(f"Received {code} from {self.rckey}.")
         if code == MESSAGE_CODES.STATUS:
             await self.handle_status(payload)
             return
-        elif code in [MESSAGE_CODES.TX,
-                    MESSAGE_CODES.BLOCK_HEADERS,
-                    MESSAGE_CODES.GET_BLOCK_HEADERS,
-                    MESSAGE_CODES.NEW_BLOCK_HASHES,
-                    MESSAGE_CODES.GET_BLOCK_BODIES,
-                    MESSAGE_CODES.BLOCK_BODIES,
-                    MESSAGE_CODES.NEW_BLOCK]:
+        elif code in [
+            MESSAGE_CODES.TX,
+            MESSAGE_CODES.BLOCK_HEADERS,
+            MESSAGE_CODES.GET_BLOCK_HEADERS,
+            MESSAGE_CODES.NEW_BLOCK_HASHES,
+            MESSAGE_CODES.GET_BLOCK_BODIES,
+            MESSAGE_CODES.BLOCK_BODIES,
+            MESSAGE_CODES.NEW_BLOCK
+        ]:
             if self.version < 62:
                 return
-        elif code in [MESSAGE_CODES.GET_NODE_DATA,
-                    MESSAGE_CODES.NODE_DATA,
-                    MESSAGE_CODES.GET_RECEIPTS,
-                    MESSAGE_CODES.RECEIPTS,
-                    ]:
+        elif code in [
+            MESSAGE_CODES.GET_NODE_DATA,
+            MESSAGE_CODES.NODE_DATA,
+            MESSAGE_CODES.GET_RECEIPTS,
+            MESSAGE_CODES.RECEIPTS,
+        ]:
             if self.version < 63:
                 return
-        elif code in [MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES,
-                    MESSAGE_CODES.GET_POOLED_TRANSACTIONS,
-                    MESSAGE_CODES.POOLED_TRANSACTIONS]:
+        elif code in [
+            MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES,
+            MESSAGE_CODES.GET_POOLED_TRANSACTIONS,
+            MESSAGE_CODES.POOLED_TRANSACTIONS
+        ]:
             if self.version < 65:
                 return
         else:
@@ -256,24 +259,21 @@ class Eth(Protocol):
                     f"Error on calling handle_message from {self.rckey} "
                     f"to handler.\nDetail: {traceback.format_exc()}"
                 )
-    
+
     async def send_status(self) -> None:
         await self.base.send_message(
-            MESSAGE_CODES.STATUS.value + self.offset,
-            self.status.to_RLP()
+            MESSAGE_CODES.STATUS.value + self.offset, self.status.to_RLP()
         )
         logger.info(
             f"Send STATUS message to {self.rckey} "
             f"(eth{self.version})."
         )
-    
+
     async def handle_status(self, payload: RLP) -> None:
         try:
             self.peer_status = Status.from_RLP(payload, self.version >= 64)
         except Exception:
-            logger.warn(
-                f"Status message format mismatch from {self.rckey}."
-            )
+            logger.warn(f"Status message format mismatch from {self.rckey}.")
             await self.base.send_disconnect(
                 DISCONNECT_REASONS.SUBPROTOCOL_ERROR
             )
@@ -310,8 +310,8 @@ class Eth(Protocol):
             await self.base.send_disconnect(
                 DISCONNECT_REASONS.SUBPROTOCOL_ERROR
             )
-        elif self.version >= 64 \
-            and not self.validate_fork_id(self.peer_status.fork_id):
+        elif self.version >= 64 and \
+                not self.validate_fork_id(self.peer_status.fork_id):
             logger.warn(
                 f"Hard fork mismatch from {self.rckey} "
                 f"(value: {self.peer_status.fork_id[0].hex()})."
@@ -328,9 +328,7 @@ class Eth(Protocol):
         #         DISCONNECT_REASONS.SUBPROTOCOL_ERROR
         #     )
         else:
-            logger.info(
-                f"Successfully connected to {self.rckey}."
-            )
+            logger.info(f"Successfully connected to {self.rckey}.")
             for handler in self.handlers:
                 try:
                     handler.after_status()
@@ -340,7 +338,6 @@ class Eth(Protocol):
                         f" to handler.\nDetail: {traceback.format_exc()}"
                     )
 
-    
     def validate_fork_id(self, fork_id: list[bytes]) -> None:
         """
         Eth 64 Fork ID validation (EIP-2124)
@@ -348,8 +345,8 @@ class Eth(Protocol):
         """
         peer_fork_hash = fork_id[0]
         peer_next_fork = fork_id[1]
-        if peer_fork_hash == self.hard_fork_hash \
-            and self.next_fork >= peer_next_fork:
+        if peer_fork_hash == self.hard_fork_hash and \
+                self.next_fork >= peer_next_fork:
             logger.info(
                 f"{self.rckey} is advertising a future "
                 "fork that passed locally."
@@ -364,7 +361,6 @@ class Eth(Protocol):
     async def send_message(self, code: MESSAGE_CODES, payload: RLP) -> bool:
         logger.info(f"Send {code} to {self.rckey}.")
         return await self.base.send_message(self.offset + code.value, payload)
-
 
 
 # Protocol.register(eth62, Eth)

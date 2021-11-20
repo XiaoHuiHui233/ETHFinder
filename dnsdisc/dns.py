@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of DNS resolution service and EIP-1459.
 
 This used to resolve domain which are containing node record and convert
@@ -10,7 +9,7 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.10"
+__version__ = "1.12"
 
 import math
 import random
@@ -40,7 +39,6 @@ class Context:
     """An information class used to implement records in the recursive
     parsing process and verify the legitimacy of the parsing elements.
     """
-
     def __init__(self, domain: str, public_key_base64: bytes) -> None:
         self.domain = domain
         # Base32 strings also need padding.
@@ -72,12 +70,12 @@ def get_txt_record(subdomain: str, context: Context) -> str:
             "Received empty result array while fetching TXT record."
         )
     result = b"".join(rrset[0].strings).decode()
-    if len(result) == 0:
+    if not result:
         raise ValueError("Received empty TXT record.")
     logger.info(f"Successfully resolve domain: {location}")
     dns_tree_cache[subdomain] = result
     return result
-    
+
 
 def select_random_path(branches: list[str], context: Context) -> str:
     """Randomly return a branch from branches.
@@ -97,8 +95,7 @@ def select_random_path(branches: list[str], context: Context) -> str:
     if len(circular_refs) == len(branches):
         raise ValueError("Unresolvable circular path detected.")
     index = math.floor(random.random() * len(branches))
-    while (index in circular_refs
-            and circular_refs[index]):
+    while (index in circular_refs and circular_refs[index]):
         index = math.floor(random.random() * len(branches))
     return branches[index]
 
@@ -123,7 +120,7 @@ def search(subdomain: str, context: Context) -> PeerNetworkInfo:
         analyzed.
     :param Context context: Contextual information passed recursively
         for parsing and analysis.
-    :return PeerNetworkInfo: The analyzed node network information.  
+    :return PeerNetworkInfo: The analyzed node network information.
     """
     try:
         entry = get_txt_record(subdomain, context)
@@ -139,9 +136,7 @@ def search(subdomain: str, context: Context) -> PeerNetworkInfo:
             next = enr.parse_and_verify_root(entry, context.public_key)
             return search(next, context)
     except Exception:
-        logger.error(
-            f"Errored searching DNS tree at subdomain {subdomain}."
-        )
+        logger.error(f"Errored searching DNS tree at subdomain {subdomain}.")
         logger.error(traceback.format_exc())
 
 
@@ -149,7 +144,7 @@ def get_peers(domain: str, peer_num: int) -> set[PeerNetworkInfo]:
     """Returns a set of nodes resolved by a given DNS domain.
 
     :param str domain: A DNS domain.
-    :param int peer_num: The number of peers are wanted to return. 
+    :param int peer_num: The number of peers are wanted to return.
     :return set[PeerNetworkInfo]: A set of node network information.
     """
     global dns_tree_cache

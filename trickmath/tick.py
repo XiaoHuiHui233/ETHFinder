@@ -10,7 +10,8 @@ def get_sqrt_ratio_at_tick(tick: int) -> int:
     if abs_tick > MAX_TICK:
         raise ValueError()
 
-    ratio = 0xfffcb933bd6fad37aa2d162d1a594001 if abs_tick & 1 != 0 else 0x100000000000000000000000000000000
+    ratio = 0xfffcb933bd6fad37aa2d162d1a594001 if abs_tick & 1 != 0 \
+        else 0x100000000000000000000000000000000
     if abs_tick & 0x2 != 0:
         ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128
     if abs_tick & 0x4 != 0:
@@ -19,7 +20,7 @@ def get_sqrt_ratio_at_tick(tick: int) -> int:
         ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128
     if abs_tick & 0x10 != 0:
         ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128
-    if abs_tick & 0x20 != 0: 
+    if abs_tick & 0x20 != 0:
         ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128
     if abs_tick & 0x40 != 0:
         ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128
@@ -50,17 +51,20 @@ def get_sqrt_ratio_at_tick(tick: int) -> int:
     if abs_tick & 0x80000 != 0:
         ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128
     if tick > 0:
-        ratio = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff // ratio
+        ratio = (2**256 - 1) // ratio
 
     # this divides by 1<<32 rounding up to go from a Q128.128 to a Q128.96.
-    # we then downcast because we know the result always fits within 160 bits due to our tick input constraint
-    # we round up in the division so getTickAtSqrtRatio of the output price is always consistent
+    # we then downcast because we know the result always fits within 160 bits
+    # due to our tick input constraint
+    # we round up in the division so getTickAtSqrtRatio of the output price is
+    # always consistent
     sqrt_price_X96 = (ratio >> 32) + (0 if ratio % (1 << 32) == 0 else 1)
     return sqrt_price_X96
 
 
 def get_tick_at_sqrt_ratio(sqrt_price_X96: int) -> int:
-    # second inequality must be < because the price can never reach the price at the max tick
+    # second inequality must be < because the price can never reach the price
+    # at the max tick
     if sqrt_price_X96 < MIN_SQRT_RATIO or sqrt_price_X96 > MAX_SQRT_RATIO:
         raise ValueError()
     ratio = sqrt_price_X96 << 32
@@ -71,7 +75,7 @@ def get_tick_at_sqrt_ratio(sqrt_price_X96: int) -> int:
     f = f << 7
     msb = msb | f
     r = r >> f
-    
+
     f = 1 if r > 0xFFFFFFFFFFFFFFFF else 0
     f = f << 6
     msb = msb | f
@@ -117,13 +121,14 @@ def get_tick_at_sqrt_ratio(sqrt_price_X96: int) -> int:
         f = r >> 128
         log_2 = log_2 | (f << temp)
         r = r >> f
-        
+
     # 128.128 number
     log_sqrt10001 = log_2 * 255738958999603826347141
 
     tick_low = (log_sqrt10001 - 3402992956809132418596140100660247210) >> 128
     tick_hi = (log_sqrt10001 + 291339464771989622907027621153398088495) >> 128
 
-    tick = tick_low if tick_low == tick_hi else tick_hi if get_sqrt_ratio_at_tick(tick_hi) <= sqrt_price_X96 else tick_low
+    tick = tick_low if tick_low == tick_hi else \
+        tick_hi if get_sqrt_ratio_at_tick(tick_hi) <= sqrt_price_X96 else \
+        tick_low
     return tick
-

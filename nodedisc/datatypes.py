@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """
 """
 
@@ -20,47 +19,37 @@ RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 class PeerInfo:
     """A class representing the peer in a peer-to-peer network."""
-
     def __init__(
-            self, address: IPAddress, udp_port: int, tcp_port: int) -> None:
+        self, address: IPAddress, udp_port: int, tcp_port: int
+    ) -> None:
         self.address = address
         self.udp_port = udp_port
         self.tcp_port = tcp_port
 
     def __hash__(self) -> int:
-        return hash(self.address) ^ \
-        hash(self.udp_port) ^ \
-        hash(self.tcp_port)
-    
+        return hash(self.address) ^ hash(self.udp_port) ^ hash(self.tcp_port)
+
     def __eq__(self, other) -> bool:
         if not isinstance(other, PeerInfo):
             return False
         return (
-            self.address == other.address
-            and self.tcp_port == other.tcp_port
+            self.address == other.address and self.tcp_port == other.tcp_port
             and self.udp_port == other.udp_port
         )
 
     def __ne__(self, other) -> bool:
         if not isinstance(other, PeerInfo):
             return True
-        return (self.address != other.address
-            or self.tcp_port != other.tcp_port
-            or self.udp_port != other.udp_port)
+        return (
+            self.address != other.address or self.tcp_port != other.tcp_port
+            or self.udp_port != other.udp_port
+        )
 
     def to_RLP(self) -> RLP:
         if self.address.version == 4:
-            return [
-                int(self.address),
-                self.udp_port,
-                self.tcp_port
-            ]
+            return [int(self.address), self.udp_port, self.tcp_port]
         elif self.address.version == 6:
-            return [
-                int(self.address),
-                self.udp_port,
-                self.tcp_port
-            ]
+            return [int(self.address), self.udp_port, self.tcp_port]
         else:
             raise ValueError("Bad ip address version.")
 
@@ -73,7 +62,7 @@ class PeerInfo:
         :return PeerInfo: The peer info object.
         """
         return cls(raw_peer.address, raw_peer.udp_port, raw_peer.tcp_port)
-    
+
     @classmethod
     def decode(cls, payload: RLP) -> "PeerInfo":
         return cls(
@@ -87,7 +76,6 @@ class Message(metaclass=ABCMeta):
     """The base abstract class of the communication packet of the
     Node Discovery Protocol.
     """
-
     @abstractmethod
     def to_bytes(self) -> bytes:
         """Each subclass should implement this function to convert
@@ -96,5 +84,3 @@ class Message(metaclass=ABCMeta):
         :return bytes: A bytes stream.
         """
         return NotImplemented
-
-

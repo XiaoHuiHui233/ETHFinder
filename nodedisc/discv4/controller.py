@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of message encapsulation module of node discovery
 protocol v4.
 
@@ -78,16 +77,17 @@ class ListenerV4(metaclass=ABCMeta):
     @abstractmethod
     async def on_pong(self, peer: PeerInfo, id: PublicKey) -> None:
         return NotImplemented
-    
+
     @abstractmethod
-    async def on_find_neighbours(self, peer: PeerInfo,
-            target: PublicKey) -> None:
+    async def on_find_neighbours(
+        self, peer: PeerInfo, target: PublicKey
+    ) -> None:
         return NotImplemented
-    
+
     @abstractmethod
     async def on_neighbours(self, nodes: list[PeerInfo]) -> None:
         return NotImplemented
-    
+
     @abstractmethod
     async def on_enrresponse(self, enr: bytes) -> None:
         return NotImplemented
@@ -96,9 +96,15 @@ class ListenerV4(metaclass=ABCMeta):
 class ControllerV4(Controller):
     """
     """
-    def __init__(self, base_loop: Nursery, private_key: PrivateKey,
-            my_peer: PeerInfo, enr_seq: int, enr: bytes,
-            ping_timeout: float) -> None:
+    def __init__(
+        self,
+        base_loop: Nursery,
+        private_key: PrivateKey,
+        my_peer: PeerInfo,
+        enr_seq: int,
+        enr: bytes,
+        ping_timeout: float
+    ) -> None:
         super().__init__(base_loop)
         self.private_key = private_key
         self.my_peer = my_peer
@@ -125,9 +131,7 @@ class ControllerV4(Controller):
                 return
             for listener in self.listeners:
                 try:
-                    await listener.on_ping_timeout(
-                        self.requests[ping_hash][0]
-                    )
+                    await listener.on_ping_timeout(self.requests[ping_hash][0])
                 except Exception:
                     logger.error(
                         f"Error on calling on_ping_timeout to listener.\n"
@@ -161,7 +165,6 @@ class ControllerV4(Controller):
         event = Event()
         self.requests[bytes_hash] = (peer, event)
         self.base_loop.start_soon(self.waiting_for_pong, bytes_hash)
-        
 
     async def find_neighbours(self, peer: PeerInfo, target: PublicKey) -> None:
         """Send a findneighbours message packet to the designated peer.
@@ -227,21 +230,13 @@ class ControllerV4(Controller):
         # handle message
         if isinstance(msg, PingMessage):
             remote = PeerInfo(
-                ipaddress.ip_address(ip),
-                port,
-                msg.from_peer.tcp_port
+                ipaddress.ip_address(ip), port, msg.from_peer.tcp_port
             )
             new_msg = PongMessage(
-                self.private_key,
-                remote,
-                bytes_hash,
-                self.enr_seq
+                self.private_key, remote, bytes_hash, self.enr_seq
             )
             logger.info(f"Send {new_msg} to {rckey}")
-            await self.server.send(
-                remote,
-                new_msg.to_bytes()
-            )
+            await self.server.send(remote, new_msg.to_bytes())
             for listener in self.listeners:
                 try:
                     await listener.on_pong(remote, public_key)
@@ -267,17 +262,15 @@ class ControllerV4(Controller):
                     "but no corresponding ping packet."
                 )
         elif isinstance(msg, FindNeighboursMessage):
-            if (rckey in self.last_pong 
-                and time.monotonic() - self.last_pong[rckey] > 43200):
+            if (
+                rckey in self.last_pong
+                and time.monotonic() - self.last_pong[rckey] > 43200
+            ):
                 return
             for listener in self.listeners:
                 try:
                     await listener.on_find_neighbours(
-                        PeerInfo(
-                            ipaddress.ip_address(ip),
-                            port,
-                            0
-                        ),
+                        PeerInfo(ipaddress.ip_address(ip), port, 0),
                         msg.target
                     )
                 except Exception:
@@ -295,21 +288,17 @@ class ControllerV4(Controller):
                         f"Detail: {traceback.format_exc()}"
                     )
         elif isinstance(msg, ENRRequestMessage):
-            if (rckey in self.last_pong 
-                and time.monotonic() - self.last_pong[rckey] > 43200):
+            if (
+                rckey in self.last_pong
+                and time.monotonic() - self.last_pong[rckey] > 43200
+            ):
                 return
             new_msg = ENRResponseMessage(
-                self.private_key,
-                bytes_hash,
-                self.enr
+                self.private_key, bytes_hash, self.enr
             )
             logger.info(f"Send {new_msg} to {rckey}")
             await self.server.send(
-                PeerInfo(
-                    ipaddress.ip_address(ip),
-                    port,
-                    0
-                ),
+                PeerInfo(ipaddress.ip_address(ip), port, 0),
                 new_msg.to_bytes()
             )
         elif isinstance(msg, ENRResponseMessage):

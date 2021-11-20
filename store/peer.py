@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of peer data store module.
 """
 
@@ -35,15 +34,9 @@ def write_peers(peers: list[str]) -> None:
             port = ss[1]
             try:
                 ls.append({
-                    "ip": ip,
-                    "port": int(port)
+                    "ip": ip, "port": int(port)
                 })
             except Exception:
                 continue
     with open("./datas/peer.json", "w") as wf:
-        ujson.dump(
-            ls,
-            wf,
-            ensure_ascii=False,
-            indent=4
-        )
+        ujson.dump(ls, wf, ensure_ascii=False, indent=4)

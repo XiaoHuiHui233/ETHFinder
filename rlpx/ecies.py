@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implemention of RLPx protocol.
 """
 
@@ -52,11 +51,9 @@ def padding(value: bytes) -> bytes:
 
 def xor(left: bytes, right: bytes) -> bytes:
     left_num = int.from_bytes(left, byteorder="big")
-    right_num = int.from_bytes(right , byteorder="big")
+    right_num = int.from_bytes(right, byteorder="big")
     return int.to_bytes(
-        left_num ^ right_num,
-        byteorder="big",
-        length = len(left)
+        left_num ^ right_num, byteorder="big", length=len(left)
     )
 
 
@@ -73,13 +70,10 @@ def generate_privkey() -> PrivateKey:
     """
     privkey = cast(
         EllipticCurvePrivateKeyWithSerialization,
-        ec.generate_private_key(CURVE, default_backend()))
+        ec.generate_private_key(CURVE, default_backend())
+    )
     return KeyAPI().PrivateKey(
-        pad32(
-            int_to_big_endian(
-                privkey.private_numbers().private_value
-            )
-        )
+        pad32(int_to_big_endian(privkey.private_numbers().private_value))
     )
 
 
@@ -88,20 +82,17 @@ def ecdh_agree(privkey: PrivateKey, pubkey: PublicKey) -> bytes:
     """
     privkey_as_int = int(cast(int, privkey))
     ec_privkey = ec.derive_private_key(
-        privkey_as_int,
-        CURVE,
-        default_backend()
+        privkey_as_int, CURVE, default_backend()
     )
     pubkey_bytes = b"\x04" + pubkey.to_bytes()
     try:
         # either of these can raise a ParseError:
         pubkey_nums = ec.EllipticCurvePublicKey.from_encoded_point(
-            CURVE,
-            pubkey_bytes
+            CURVE, pubkey_bytes
         )
         ec_pubkey = pubkey_nums.public_numbers().public_key(default_backend())
     except ParseError as exc:
-        # Not all bytes can be made into valid public keys, see the 
+        # Not all bytes can be made into valid public keys, see the
         # warning at
         # https://cryptography.io/en/latest/hazmat/primitives/asymmetric/ec/
         # under EllipticCurvePublicNumbers(x, y)
@@ -109,8 +100,9 @@ def ecdh_agree(privkey: PrivateKey, pubkey: PublicKey) -> bytes:
     return ec_privkey.exchange(ec.ECDH(), ec_pubkey)
 
 
-def encrypt(data: bytes, pubkey: PublicKey,
-        shared_mac_data: bytes = b"") -> bytes:
+def encrypt(
+    data: bytes, pubkey: PublicKey, shared_mac_data: bytes = b""
+) -> bytes:
     """Encrypt data with ECIES method to the given public key
     1) generate r = random value
     2) generate shared-secret = kdf( ecdhAgree(r, P) )
@@ -143,7 +135,9 @@ def encrypt(data: bytes, pubkey: PublicKey,
     return msg + tag
 
 
-def decrypt(data: bytes, privkey: PrivateKey, shared_mac_data: bytes = b"") -> bytes:
+def decrypt(
+    data: bytes, privkey: PrivateKey, shared_mac_data: bytes = b""
+) -> bytes:
     """Decrypt data with ECIES method using the given private key
     1) generate shared-secret = kdf( ecdhAgree(myPrivKey, msg[1:65]) )
     2) verify tag
@@ -168,7 +162,9 @@ def decrypt(data: bytes, privkey: PrivateKey, shared_mac_data: bytes = b"") -> b
     tag = data[-KEY_LEN:]
 
     # 2) Verify tag
-    expected_tag = hmac_sha256(key_mac, data[1 + PUBKEY_LEN:- KEY_LEN] + shared_mac_data)
+    expected_tag = hmac_sha256(
+        key_mac, data[1 + PUBKEY_LEN:-KEY_LEN] + shared_mac_data
+    )
     if not bytes_eq(expected_tag, tag):
         raise ParseError("Failed to verify tag")
 
@@ -176,7 +172,7 @@ def decrypt(data: bytes, privkey: PrivateKey, shared_mac_data: bytes = b"") -> b
     algo = CIPHER(key_enc)
     blocksize = algo.block_size // 8
     iv = data[1 + PUBKEY_LEN:1 + PUBKEY_LEN + blocksize]
-    ciphertext = data[1 + PUBKEY_LEN + blocksize:- KEY_LEN]
+    ciphertext = data[1 + PUBKEY_LEN + blocksize:-KEY_LEN]
     ctx = Cipher(algo, MODE(iv), default_backend()).decryptor()
     return ctx.update(ciphertext) + ctx.finalize()
 
@@ -188,9 +184,10 @@ def kdf(key_material: bytes) -> bytes:
     """
     key = b""
     hash_ = hashes.SHA256()
-    # FIXME: Need to find out why mypy thinks SHA256 has no "block_size" attribute
+    # FIXME: Need to find out why mypy thinks SHA256 has no "block_size"
+    # attribute
     hash_blocksize = hash_.block_size  # type: ignore
-    reps = ((KEY_LEN + 7) * 8) / (hash_blocksize * 8)
+    reps = ((KEY_LEN+7) * 8) / (hash_blocksize*8)
     counter = 0
     while counter <= reps:
         counter += 1
@@ -224,8 +221,9 @@ class ECIES:
         self.got_EIP8_ack = False
         self.body_size = None
 
-    def parse_auth_plain(self, data: bytes,
-            shared_mac_data: bytes = b"") -> bytes:
+    def parse_auth_plain(
+        self, data: bytes, shared_mac_data: bytes = b""
+    ) -> bytes:
         prefix = shared_mac_data
         self.remote_init_msg = b"".join((prefix, data))
         try:
@@ -234,7 +232,7 @@ class ECIES:
                 if len(decrypted) != 194:
                     raise ParseError("Invalid packet length.")
                 sig = Signature(decrypted[:65])
-                heid = decrypted[65:97] # 32 bytes
+                heid = decrypted[65:97]  # 32 bytes
                 remote_pubkey = PublicKey(decrypted[97:161])
                 remote_nonce = decrypted[161:193]
             else:
@@ -246,8 +244,8 @@ class ECIES:
         except ValidationError as err:
             raise ParseError(f"Except validation error, detail: {err}")
         # parse packet
-        self.remote_pubkey = remote_pubkey # 64 bytes
-        self.remote_nonce = remote_nonce # 32 bytes
+        self.remote_pubkey = remote_pubkey  # 64 bytes
+        self.remote_nonce = remote_nonce  # 32 bytes
         if decrypted[193] != 0:
             raise ParseError("Invalid postfix.")
         static_shared_secret = ecdh_agree(self.private_key, self.remote_pubkey)
@@ -264,7 +262,7 @@ class ECIES:
         if heid is not None:
             if keccak(self.remote_ephemeral_pubkey.to_bytes()) != heid:
                 raise ParseError("The hash of the ephemeral key should match.")
-    
+
     def parse_auth_EIP8(self, data: bytes) -> None:
         auth_size = int.from_bytes(data[:2], byteorder="big") + 2
         if len(data) != auth_size:
@@ -275,22 +273,14 @@ class ECIES:
 
     def create_ack_EIP8(self) -> bytes:
         ack_vsn = 0x04
-        data = [
-            self.ephemeral_pubkey.to_bytes(),
-            self.nonce,
-            ack_vsn
-        ]
+        data = [self.ephemeral_pubkey.to_bytes(), self.nonce, ack_vsn]
         ack_body = rlp.encode(data)
         # Random padding between 100, 250
         ack_padding = secrets.token_bytes(random.randint(100, 250))
         ack_body = b"".join((ack_body, ack_padding))
         overhead_length = 113
         ack_size = len(ack_body) + overhead_length
-        ack_size_bytes = int.to_bytes(
-            ack_size,
-            length=2,
-            byteorder="big"
-        )
+        ack_size_bytes = int.to_bytes(ack_size, length=2, byteorder="big")
         enc_ack_body = encrypt(ack_body, self.remote_pubkey, ack_size_bytes)
         self.init_msg = b"".join((ack_size_bytes, enc_ack_body))
         self.setup_frame(True)
@@ -305,30 +295,27 @@ class ECIES:
         self.init_msg = encrypt(data, self.remote_pubkey)
         self.setup_frame(True)
         return self.init_msg
-    
+
     def setup_frame(self, incoming: bool) -> None:
         nonce_material = b"".join(
-            (self.nonce, self.remote_nonce) if incoming \
-                else (self.remote_nonce, self.nonce)
+            (self.nonce, self.remote_nonce) if incoming
+            else (self.remote_nonce, self.nonce)
         )
         h_nonce = keccak(nonce_material)
         IV = int.to_bytes(0, byteorder="big", length=16)
-        shared_secret = keccak(b"".join((
-            self.ephemeral_shared_secret,
-            h_nonce
-        )))
-        aes_secret = keccak(b"".join((
-            self.ephemeral_shared_secret,
-            shared_secret
-        )))
+        shared_secret = keccak(
+            b"".join((self.ephemeral_shared_secret, h_nonce))
+        )
+        aes_secret = keccak(
+            b"".join((self.ephemeral_shared_secret, shared_secret))
+        )
         self.ingress_aes = \
             Cipher(CIPHER(aes_secret), MODE(IV), default_backend()).decryptor()
         self.egress_aes = \
             Cipher(CIPHER(aes_secret), MODE(IV), default_backend()).decryptor()
-        mac_secret = keccak(b"".join((
-            self.ephemeral_shared_secret,
-            aes_secret
-        )))
+        mac_secret = keccak(
+            b"".join((self.ephemeral_shared_secret, aes_secret))
+        )
         self.ingress_mac = MAC(mac_secret, self.nonce, self.remote_init_msg)
         self.egress_mac = MAC(mac_secret, self.remote_nonce, self.init_msg)
 
@@ -337,15 +324,14 @@ class ECIES:
         # TODO: the rlp will contain something else someday
         capability_id = 0
         context_id = 0
-        header = b"".join((
-            frame_size_bytes,
-            rlp.encode([capability_id, context_id])
-        ))
+        header = b"".join(
+            (frame_size_bytes, rlp.encode([capability_id, context_id]))
+        )
         header = padding(header)
         header_ciphertext = self.egress_aes.update(header)
         header_mac = self.egress_mac.update_header(header_ciphertext)
         return b"".join((header_ciphertext, header_mac))
-    
+
     def create_body(self, frame: bytes) -> bytes:
         frame = padding(frame)
         frame_ciphertext = self.egress_aes.update(frame)
@@ -355,15 +341,16 @@ class ECIES:
     def create_auth_EIP8(self) -> bytes:
         """
         auth-vsn         = 4
-        auth-size        = size of enc-auth-body, encoded as a big-endian 16-bit integer
-        auth-body        = rlp.list(sig, initiator-pubk, initiator-nonce, auth-vsn)
+        auth-size        = size of enc-auth-body, encoded as a big-endian
+                           16-bit integer
+        auth-body        = rlp.list(sig, initiator-pubk, initiator-nonce,
+                           auth-vsn)
         enc-auth-body    = ecies.encrypt(recipient-pubk, auth-body, auth-size)
         auth-packet      = auth-size || enc-auth-body
         """
         static_shared_secret = ecdh_agree(self.private_key, self.remote_pubkey)
         sig = KeyAPI().ecdsa_sign(
-            xor(static_shared_secret, self.nonce),
-            self.ephemeral_private_key
+            xor(static_shared_secret, self.nonce), self.ephemeral_private_key
         )
         auth_vsn = 0x04
         auth_body = [
@@ -379,20 +366,15 @@ class ECIES:
         auth_body += auth_padding
         overhead_length = 113
         auth_size = len(auth_body) + overhead_length
-        auth_size_bytes = int.to_bytes(
-            auth_size,
-            length=2,
-            byteorder="big"
-        )
+        auth_size_bytes = int.to_bytes(auth_size, length=2, byteorder="big")
         enc_auth_body = encrypt(auth_body, self.remote_pubkey, auth_size_bytes)
         self.init_msg = b"".join((auth_size_bytes, enc_auth_body))
         return self.init_msg
-    
+
     def create_auth_non_EIP8(self) -> bytes:
         static_shared_secret = ecdh_agree(self.private_key, self.remote_pubkey)
         sig = KeyAPI().ecdsa_sign(
-            xor(static_shared_secret, self.nonce),
-            self.ephemeral_private_key
+            xor(static_shared_secret, self.nonce), self.ephemeral_private_key
         )
         data = b"".join([
             sig.to_bytes(),
@@ -403,9 +385,10 @@ class ECIES:
         ])
         self.init_msg = encrypt(data, self.remote_pubkey)
         return self.init_msg
-    
-    def parse_ack_plain(self, data: bytes,
-            shared_mac_data: bytes = b"") -> None:
+
+    def parse_ack_plain(
+        self, data: bytes, shared_mac_data: bytes = b""
+    ) -> None:
         self.remote_init_msg = b"".join((shared_mac_data, data))
         decrypted = decrypt(data, self.private_key, shared_mac_data)
         if not self.got_EIP8_ack:
@@ -423,8 +406,7 @@ class ECIES:
         self.remote_ephemeral_pubkey = remote_ephemeral_pubkey
         self.remote_nonce = remote_nonce
         self.ephemeral_shared_secret = ecdh_agree(
-            self.ephemeral_private_key,
-            self.remote_ephemeral_pubkey
+            self.ephemeral_private_key, self.remote_ephemeral_pubkey
         )
         self.setup_frame(False)
 
@@ -435,7 +417,6 @@ class ECIES:
                 "Message length different from specified size (EIP8)."
             )
         self.parse_ack_plain(data[2:], data[0:2])
-    
 
     def parse_header(self, data: bytes) -> int:
         header_ciphertext = data[:16]
@@ -446,7 +427,7 @@ class ECIES:
         header = self.ingress_aes.update(header_ciphertext)
         self.body_size = int.from_bytes(header[:3], byteorder="big")
         return self.body_size
-    
+
     def parse_body(self, data: bytes) -> bytes:
         if self.body_size is None:
             raise ParseError("Need to parse header first.")

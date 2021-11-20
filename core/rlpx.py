@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of core controller of RLPx protocol.
 """
 
@@ -53,6 +52,7 @@ class MyTCPListener(TCPListener):
             p2p.register_listener(listener)
         peer.register_handler(p2p)
 
+
 class RLPxCore:
     """
     """
@@ -67,7 +67,7 @@ class RLPxCore:
         self.server.register_listener(MyTCPListener(self))
         self.queue = queue
         self.p2p_listeners: list[P2pListener] = []
-    
+
     def p2p_register_listener(self, listener: P2pListener) -> None:
         self.p2p_listeners.append(listener)
 
@@ -75,9 +75,7 @@ class RLPxCore:
         async with trio.open_nursery() as rlpx_loop:
             self.rlpx_loop = rlpx_loop
             rlpx_loop.start_soon(
-                self.server.bind,
-                "0.0.0.0",
-                opts.MY_PEER.tcp_port
+                self.server.bind, "0.0.0.0", opts.MY_PEER.tcp_port
             )
             while True:
                 await trio.sleep(opts.REFILL_INTERVALL)
@@ -95,9 +93,5 @@ class RLPxCore:
             except Exception:
                 break
             self.rlpx_loop.start_soon(
-                self.server.active_connect,
-                peer.address,
-                peer.tcp_port,
-                id
+                self.server.active_connect, peer.address, peer.tcp_port, id
             )
-        

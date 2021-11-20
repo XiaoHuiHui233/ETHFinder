@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of services, include web service and store
 service.
 """
@@ -64,11 +63,11 @@ class StoreService:
                 f"Queue size: {self.channel.qsize()}"
             )
             await trio.sleep(opts.SERVICE_INTERVAL)
-    
+
     async def listen_channel(self) -> None:
         while True:
             try:
-                datas: dict[str: Any] = self.channel.get_nowait()
+                datas: dict[str:Any] = self.channel.get_nowait()
             except Exception:
                 await trio.sleep(0)
                 continue
@@ -83,7 +82,7 @@ class StoreService:
                 async with AsyncClient() as client:
                     r = await client.post(
                         url,
-                        json = {
+                        json={
                             "timestamp": datas["receive_ts"],
                             "block_ts": datas["block_ts"],
                             "block_id": datas["height"],
@@ -113,18 +112,16 @@ class StoreService:
         sqrt_price = datas["sqrt_price"]
         latest_tick = datas["tick"]
         liquidity = datas["liquidity"]
-        tick.write_latest_tick(
-            {
-                "receive_ts": receive_ts,
-                "block_ts": block_ts,
-                "block_id": block_id,
-                "block_hash": block_hash.hex(),
-                "sqrt_price": str(sqrt_price),
-                "liquidity": str(liquidity),
-                "tick": latest_tick,
-                "info": "eth_finder"
-            }
-        )
+        tick.write_latest_tick({
+            "receive_ts": receive_ts,
+            "block_ts": block_ts,
+            "block_id": block_id,
+            "block_hash": block_hash.hex(),
+            "sqrt_price": str(sqrt_price),
+            "liquidity": str(liquidity),
+            "tick": latest_tick,
+            "info": "eth_finder"
+        })
         balance0 = Decimal(datas["balance0"]) / Decimal("1000000")
         balance1 = Decimal(datas["balance1"]) / Decimal("1000000000000000000")
         amount0 = Decimal(datas["amount0"]) / Decimal("1000000")
@@ -134,7 +131,7 @@ class StoreService:
                 async with AsyncClient() as client:
                     r = await client.post(
                         url,
-                        json = {
+                        json={
                             "timestamp": datas["receive_ts"],
                             "block_ts": datas["block_ts"],
                             "block_id": datas["height"],
@@ -149,9 +146,7 @@ class StoreService:
                             "info": "eth_finder"
                         }
                     )
-                    logger.info(
-                        f"Post tick to {url}(HTTP {r.status_code})."
-                    )
+                    logger.info(f"Post tick to {url}(HTTP {r.status_code}).")
             except Exception:
                 logger.error(
                     f"Error on post tick to {url}.\n"
@@ -160,6 +155,7 @@ class StoreService:
 
 
 app = QuartTrio("ETHFinder")
+
 
 @app.route("/tick")
 async def get_tick():
@@ -171,6 +167,7 @@ async def get_tick():
         "sqrt_price": str(sqrt_price),
         "tick": latest_tick
     }
+
 
 async def start_web_service() -> None:
     config = Config()

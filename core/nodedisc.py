@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of core controller of node discovery protocol.
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
+__version__ = "1.2"
 
 import ipaddress
 import logging
@@ -53,19 +52,20 @@ class MyListenerV4(ListenerV4):
             self.dpt.remove_peer(self.rckey_to_id[rckey])
         self.rckey_to_id[rckey] = id
         self.dpt.add_peer(peer, id)
-    
-    async def on_find_neighbours(self, peer: PeerInfo,
-            target: PublicKey) -> None:
+
+    async def on_find_neighbours(
+        self, peer: PeerInfo, target: PublicKey
+    ) -> None:
         nodes = self.dpt.get_closest_peers(target)
         await self.controller.neighbours(peer, nodes)
-    
+
     async def on_neighbours(self, nodes: list[PeerInfo]) -> None:
         for peer in nodes:
             rckey = f"{peer.address}:{peer.udp_port}"
             if rckey not in self.rckey_to_id:
                 await self.controller.ping(peer)
                 await trio.sleep(opts.DIFFER_TIME)
-    
+
     async def on_enrresponse(self, enr: bytes) -> None:
         pass
 
@@ -89,9 +89,7 @@ class NodeDiscCore:
     async def bind(self) -> None:
         async with trio.open_nursery() as node_disc_loop:
             node_disc_loop.start_soon(
-                self.server.bind,
-                "0.0.0.0",
-                opts.MY_PEER.udp_port
+                self.server.bind, "0.0.0.0", opts.MY_PEER.udp_port
             )
             self.controller_v4 = ControllerV4(
                 node_disc_loop,
@@ -110,11 +108,7 @@ class NodeDiscCore:
     async def bootstrap(self, bootnodes: list[str]) -> None:
         for boot_node in bootnodes:
             id, ip, port = parse("enode://{}@{}:{}", boot_node)
-            peer = PeerInfo(
-                ipaddress.ip_address(ip),
-                int(port),
-                int(port)
-            )
+            peer = PeerInfo(ipaddress.ip_address(ip), int(port), int(port))
             await self.controller_v4.ping(peer)
             await trio.sleep(opts.DIFFER_TIME)
         await self.refresh_known_node()
@@ -128,32 +122,23 @@ class NodeDiscCore:
     async def query_dns_nodes(self, dns_networks: list[str]) -> None:
         for network in dns_networks:
             dns_peers = dns.get_peers(network, 20)
-            logger.info(
-                f"Adding {len(dns_peers)} from {network} DNS tree."
-            )
+            logger.info(f"Adding {len(dns_peers)} from {network} DNS tree.")
             for peer in dns_peers:
                 await self.controller_v4.ping(PeerInfo.remake(peer))
                 await trio.sleep(opts.DIFFER_TIME)
 
     async def refresh_known_node(self) -> None:
         for ip, port in peer_store.read_peers():
-            peer = PeerInfo(
-                ipaddress.ip_address(ip),
-                int(port),
-                int(port)
-            )
+            peer = PeerInfo(ipaddress.ip_address(ip), int(port), int(port))
             await self.controller_v4.ping(peer)
             await trio.sleep(opts.DIFFER_TIME)
 
     async def refresh(self) -> None:
         peers = self.dpt.get_peers()
-        logger.info(
-            f"Start refreshing. Now {len(self.dpt)} peers in table."
-        )
+        logger.info(f"Start refreshing. Now {len(self.dpt)} peers in table.")
         for peer in peers:
             await self.controller_v4.find_neighbours(
-                peer,
-                PublicKey(secrets.token_bytes(64))
+                peer, PublicKey(secrets.token_bytes(64))
             )
             await trio.sleep(opts.DIFFER_TIME)
 
@@ -169,6 +154,5 @@ class NodeDiscCore:
                     refresh_loop.start_soon(self.alive_check)
                     refresh_loop.start_soon(self.refresh_known_node)
                     refresh_loop.start_soon(
-                        self.query_dns_nodes,
-                        opts.DNS_NETWORKS
+                        self.query_dns_nodes, opts.DNS_NETWORKS
                     )

@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of TCP sockets.
 """
 
@@ -44,8 +43,14 @@ class TCPListener(metaclass=ABCMeta):
 class TCPServer:
     """
     """
-    def __init__(self, private_key: PrivateKey, max_peer: int,
-            EIP8: bool, waiting_timeout: int, lock_timeout: int) -> None:
+    def __init__(
+        self,
+        private_key: PrivateKey,
+        max_peer: int,
+        EIP8: bool,
+        waiting_timeout: int,
+        lock_timeout: int
+    ) -> None:
         self.private_key = private_key
         self.max_peer = max_peer
         self.EIP8 = EIP8
@@ -60,7 +65,7 @@ class TCPServer:
 
     def is_full(self) -> bool:
         return len(self.peers) >= self.max_peer
-    
+
     def register_listener(self, listener: TCPListener) -> None:
         self.listeners.append(listener)
 
@@ -86,21 +91,21 @@ class TCPServer:
             )
             return None
 
-    async def active_connect(self, address: IPAddress, port: int,
-            remote_id: PublicKey) -> None:
+    async def active_connect(
+        self, address: IPAddress, port: int, remote_id: PublicKey
+    ) -> None:
         socket_stream = await self.connect_to(address, port)
         if socket_stream is None:
             logger.warn(f"{address}:{port} is unreachable.")
             return
         logger.info(f"Active connect to {address}:{port}.")
-        self.server_loop.start_soon(
-            self.on_connect,
-            socket_stream,
-            remote_id
-        )      
-        
-    async def on_connect(self, socket_stream: SocketStream,
-            remote_id: PublicKey = None) -> None:
+        self.server_loop.start_soon(self.on_connect, socket_stream, remote_id)
+
+    async def on_connect(
+        self,
+        socket_stream: SocketStream,
+        remote_id: PublicKey = None
+    ) -> None:
         if socket_stream is None:
             return
         rckey = "-"
@@ -122,18 +127,17 @@ class TCPServer:
                 else:
                     del self.banlist[rckey]
             await self.generate_peer(
-                socket_stream,
-                remote_id is not None,
-                remote_id
+                socket_stream, remote_id is not None, remote_id
             )
         except Exception:
             logger.warn(
                 f"Error on connect to {rckey}.\n"
                 f"Detail: {traceback.format_exc()}"
             )
-    
-    async def generate_peer(self, socket_stream: SocketStream, active: bool,
-            remote_id: PublicKey) -> None:
+
+    async def generate_peer(
+        self, socket_stream: SocketStream, active: bool, remote_id: PublicKey
+    ) -> None:
         peer = Peer(
             self.private_key,
             remote_id,

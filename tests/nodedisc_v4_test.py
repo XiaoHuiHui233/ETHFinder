@@ -1,6 +1,5 @@
 import ipaddress
 from typing import Union
-import sys
 import base64
 import logging
 import secrets
@@ -12,7 +11,6 @@ from eth_keys.datatypes import PublicKey
 from eth_hash.auto import keccak
 from parse import parse
 
-sys.path.append("./")
 from nodedisc import DPT, Server, ControllerV4, ListenerV4, PeerInfo
 from dnsdisc import dns
 import config as opts
@@ -39,9 +37,7 @@ logger.addHandler(fh)
 logger.addHandler(sh)
 
 dpt = DPT(
-    opts.PRIVATE_KEY,
-    opts.NODES_PER_KBUCKET,
-    opts.NUM_ROUTING_TABLE_BUCKETS
+    opts.PRIVATE_KEY, opts.NODES_PER_KBUCKET, opts.NUM_ROUTING_TABLE_BUCKETS
 )
 server = Server(3)
 rckey_to_id: dict[str, PublicKey] = {}
@@ -84,21 +80,22 @@ class TestListenerV4(ListenerV4):
             dpt.remove_peer(rckey_to_id[rckey])
         rckey_to_id[rckey] = id
         dpt.add_peer(peer, id)
-    
-    async def on_find_neighbours(self, peer: PeerInfo,
-            target: PublicKey) -> None:
-        rckey = f"{peer.address}:{peer.udp_port}"
+
+    async def on_find_neighbours(
+        self, peer: PeerInfo, target: PublicKey
+    ) -> None:
+        # rckey = f"{peer.address}:{peer.udp_port}"
         # logger.info(f"on find neighbours {rckey}")
         nodes = dpt.get_closest_peers(target, opts.CLOSEST_NODE_NUM)
         await self.controller.neighbours(peer, nodes)
-    
+
     async def on_neighbours(self, nodes: list[PeerInfo]) -> None:
         for peer in nodes:
             rckey = f"{peer.address}:{peer.udp_port}"
             if rckey not in rckey_to_id:
                 await self.controller.ping(peer)
                 await trio.sleep(0.1)
-    
+
     async def on_enrresponse(self, enr: bytes) -> None:
         pass
 
@@ -106,11 +103,7 @@ class TestListenerV4(ListenerV4):
 async def bootstrap(controller_v4: ControllerV4) -> None:
     for boot_node in opts.BOOTNODES:
         id, ip, port = parse("enode://{}@{}:{}", boot_node)
-        peer = PeerInfo(
-            ipaddress.ip_address(ip),
-            int(port),
-            int(port)
-        )
+        peer = PeerInfo(ipaddress.ip_address(ip), int(port), int(port))
         await controller_v4.ping(peer)
         await trio.sleep(0.1)
 
@@ -124,9 +117,7 @@ async def alive_check(controller_v4: ControllerV4) -> None:
 async def query_dns_nodes(controller_v4: ControllerV4) -> None:
     for network in opts.DNS_NETWORKS:
         dns_peers = dns.get_peers(network, 20)
-        logger.info(
-            f"Adding {len(dns_peers)} from {network} DNS tree."
-        )
+        logger.info(f"Adding {len(dns_peers)} from {network} DNS tree.")
         for peer in dns_peers:
             await controller_v4.ping(PeerInfo.remake(peer))
             await trio.sleep(0.1)
@@ -134,13 +125,10 @@ async def query_dns_nodes(controller_v4: ControllerV4) -> None:
 
 async def refresh(controller_v4: ControllerV4) -> None:
     peers = dpt.get_peers()
-    logger.info(
-        f"Start refreshing. Now {len(dpt)} peers in table."
-    )
+    logger.info(f"Start refreshing. Now {len(dpt)} peers in table.")
     for peer in peers:
         await controller_v4.find_neighbours(
-            peer,
-            PublicKey(secrets.token_bytes(64))
+            peer, PublicKey(secrets.token_bytes(64))
         )
         await trio.sleep(0.1)
 
@@ -156,7 +144,6 @@ async def refresh_loop(controller_v4: ControllerV4) -> None:
             cnt += 1
             cnt %= 6
             await trio.sleep(opts.REFRESH_INTERVAL)
-            
 
 
 async def test() -> None:
@@ -165,11 +152,7 @@ async def test() -> None:
         controller_v4 = ControllerV4(
             nursery,
             opts.PRIVATE_KEY,
-            PeerInfo(
-                ipaddress.ip_address("104.250.52.28"),
-                30303,
-                30303
-            ),
+            PeerInfo(ipaddress.ip_address("104.250.52.28"), 30303, 30303),
             1,
             get_enr(1),
             10
@@ -180,5 +163,6 @@ async def test() -> None:
         await trio.sleep(1)
         nursery.start_soon(bootstrap, controller_v4)
         nursery.start_soon(refresh_loop, controller_v4)
+
 
 trio.run(test)

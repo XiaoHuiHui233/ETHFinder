@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
-"""A implementation of Distributed Peer Table.  
+"""A implementation of Distributed Peer Table.
 
 Participants in the Discovery Protocol are expected to maintain a node
 record (ENR) containing up-to-date information. All records must use the
 "v4" identity scheme. Other nodes may request the local record at any
-time by sending an ENRRequest packet.  
+time by sending an ENRRequest packet.
 
 To resolve the current record of any node public key, perform a Kademlia
 lookup using FindNode packets. When the node is found, send ENRRequest
-to it and return the record from the response.  
+to it and return the record from the response.
 
-See: https://github.com/ethereum/devp2p/blob/master/discv4.md  
+See: https://github.com/ethereum/devp2p/blob/master/discv4.md
 
 """
 
@@ -51,7 +50,7 @@ def compute_log_distance(left_node_id: bytes, right_node_id: bytes) -> int:
     """Calculate the logarithmic distance. The logarithmic distance
     refers to the number of bits where the highest different bits of two
     public key bytes in binary.
-    
+
     Binary can be understood as a logarithm with base two. So we call
     this the logarithmic distance.
 
@@ -70,18 +69,16 @@ def compute_log_distance(left_node_id: bytes, right_node_id: bytes) -> int:
 
 class KademliaRoutingTable:
     """A Kademlia routing table implementation class."""
-
-    def __init__(self, center_node_id: bytes, bucket_size: int,
-            num_buckets: int) -> None:
+    def __init__(
+        self, center_node_id: bytes, bucket_size: int, num_buckets: int
+    ) -> None:
         self.center_node_id = center_node_id
         self.bucket_size = bucket_size
         self.buckets: list[deque] = [
-            deque(maxlen=bucket_size) \
-            for _ in range(num_buckets)
+            deque(maxlen=bucket_size) for _ in range(num_buckets)
         ]
         self.replacement_caches: list[deque] = [
-            deque() \
-            for _ in range(num_buckets)
+            deque() for _ in range(num_buckets)
         ]
         self.bucket_update_order = deque()
 
@@ -90,8 +87,9 @@ class KademliaRoutingTable:
             self.get_index_bucket_and_replacement_cache(node_id)
         return node_id in bucket or node_id in replacement_cache
 
-    def get_index_bucket_and_replacement_cache(self,
-            node_id: bytes) -> tuple[int, deque, deque]:
+    def get_index_bucket_and_replacement_cache(
+        self, node_id: bytes
+    ) -> tuple[int, deque, deque]:
         """The logarithmic distance between the peer id and the central
         peer id is used to indicate which bucket the peer corresponding
         to a given peer id should be stored in. Returns the index of
@@ -117,7 +115,7 @@ class KademliaRoutingTable:
     def update(self, node_id: bytes) -> bytes:
         """Insert a node into the routing table or move it to the top if
         already present.
-        
+
         If the bucket is already full, the node id will be added to the
         replacement cache and the oldest node is returned as an eviction
         candidate. Otherwise, the return value is `None`.
@@ -153,7 +151,7 @@ class KademliaRoutingTable:
                 logger.info(
                     f"Updating {node_id.hex()[:7]} in replacement cache of "
                     f"bucket {bucket_index}."
-                    )
+                )
                 replacement_cache.remove(node_id)
             replacement_cache.appendleft(node_id)
             eviction_candidate = bucket[-1]
@@ -193,7 +191,7 @@ class KademliaRoutingTable:
         in_replacement_cache = node_id in replacement_cache
         if in_bucket:
             bucket.remove(node_id)
-            if len(replacement_cache) > 0:
+            if replacement_cache:
                 replacement_node_id = replacement_cache.popleft()
                 logger.info(
                     f"Replacing {node_id.hex()[:7]} from bucket {bucket_index}"
@@ -219,7 +217,7 @@ class KademliaRoutingTable:
             )
         # bucket_update_order should only contain non-empty buckets,
         # so remove it if necessary
-        if len(bucket) == 0:
+        if not bucket:
             try:
                 self.bucket_update_order.remove(bucket_index)
             except ValueError:
@@ -243,21 +241,21 @@ class KademliaRoutingTable:
                 f"{len(self.buckets)}, got {log_distance}."
             )
         return list(self.buckets[log_distance - 1])
-    
+
     @property
     def is_empty(self) -> bool:
         """Determine whether the KHT is empty.
 
         :return bool: Whether the KHT is empty.
         """
-        return all(len(bucket) == 0 for bucket in self.buckets)
+        return all(not bucket for bucket in self.buckets)
 
     def get_least_recently_updated_log_distance(self) -> int:
         """Get the log distance whose corresponding bucket was updated
         least recently.
 
         Only non-empty buckets are considered.
-        
+
         :return int: The log distance.
         :raise ValueError: If all buckets are empty.
         """
@@ -277,8 +275,7 @@ class KademliaRoutingTable:
         """
         all_node_ids = itertools.chain(*self.buckets)
         distance_to_reference = functools.partial(
-            compute_distance,
-            reference_node_id
+            compute_distance, reference_node_id
         )
         sorted_node_ids = sorted(all_node_ids, key=distance_to_reference)
         return sorted_node_ids
@@ -289,7 +286,7 @@ class KademliaRoutingTable:
 
         :return list[bytes]: All nodes in the table.
         """
-        # Create a new list with all available nodes as buckets can 
+        # Create a new list with all available nodes as buckets can
         # mutate while we're iterating.
         # This shouldn't use a significant amount of memory as the new
         # list will keep just references to the existing NodeID

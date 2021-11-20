@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of The RLPx Transport Protocol.
 
 The RLPx transport protocol, a TCP-based transport protocol used for
@@ -18,12 +17,14 @@ __version__ = "2.1"
 
 import os
 
-if not os.path.exists("./logs/rlpx"):
-    os.makedirs("./logs/rlpx")
+if not os.path.exists("./logs/rlpx/protocols"):
+    os.makedirs("./logs/rlpx/protocols")
 
 from .peer import Peer, PeerHandler
 from .server import TCPListener, TCPServer
-from .protocols import Eth, EthHandler, P2p, P2pListener, Protocol, Capability
+from .protocols.datatypes import Capability
+from .protocols.p2p import P2p, P2pListener, Protocol
+from .protocols.eth import Eth, EthHandler
 
 __all__ = [
     "Peer",

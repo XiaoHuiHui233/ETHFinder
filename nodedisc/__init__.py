@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of Node Discovery Protocol.
 
 Node Discovery is a system for finding other participants in a

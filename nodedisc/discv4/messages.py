@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of message encapsulation module of node discovery
 protocol v4.
 
@@ -109,7 +108,7 @@ class MessageV4(Message):
         ).to_bytes()
         hash = keccak(b"".join((sig, packet_type, packet_data)))
         return b"".join((hash, sig, packet_type, packet_data))
-    
+
     @abstractmethod
     def to_RLP(self) -> RLP:
         """Each subclass should implement this function to convert
@@ -148,7 +147,7 @@ class MessageV4(Message):
             rlp.decode(packet_data, strict=False)
         )
         sig_hash = keccak(datas[97:])
-        signature = Signature(datas[32: 97])
+        signature = Signature(datas[32:97])
         public_key = KeyAPI().ecdsa_recover(sig_hash, signature)
         return raw_hash_bytes, msg, public_key
 
@@ -173,8 +172,13 @@ class PingMessage(MessageV4):
     """
     VERSION = 0x04
 
-    def __init__(self, private_key: PrivateKey, from_peer: PeerInfo,
-            to_peer: PeerInfo, enr_seq: int = 1) -> None:
+    def __init__(
+        self,
+        private_key: PrivateKey,
+        from_peer: PeerInfo,
+        to_peer: PeerInfo,
+        enr_seq: int = 1
+    ) -> None:
         super().__init__(private_key, 0x01)
         self.from_peer = from_peer
         self.to_peer = to_peer
@@ -182,7 +186,7 @@ class PingMessage(MessageV4):
 
     def __repr__(self) -> str:
         return "ping-packet v4"
-    
+
     def to_RLP(self) -> RLP:
         """Converted the ping-packet into a bytes list, easy to use RLP
         expression.
@@ -194,10 +198,9 @@ class PingMessage(MessageV4):
             PingMessage.VERSION,
             self.from_peer.to_RLP(),
             self.to_peer.to_RLP(),
-            timestamp(),
-            # int.to_bytes(self.enr_seq, 8, "big", signed=False)
+            timestamp(),  # int.to_bytes(self.enr_seq, 8, "big", signed=False)
         ]
-    
+
     @classmethod
     def decode(cls, payload: RLP) -> "PingMessage":
         """Decode bytes stream to ping packet and verify.
@@ -224,9 +227,7 @@ class PingMessage(MessageV4):
             )
         else:
             return cls(
-                None,
-                PeerInfo.decode(payload[1]),
-                PeerInfo.decode(payload[2])
+                None, PeerInfo.decode(payload[1]), PeerInfo.decode(payload[2])
             )
 
 
@@ -235,7 +236,7 @@ class PongMessage(MessageV4):
     v4 specification.
 
     packet-data = [to, ping-hash, expiration, enr-seq, ...]
-    
+
     Pong is the reply to ping.
 
     ping-hash should be equal to hash of the corresponding ping packet.
@@ -245,9 +246,13 @@ class PongMessage(MessageV4):
     The enr-seq field is the current ENR sequence number of the sender.
     This field is optional.
     """
-
-    def __init__(self, private_key: PrivateKey, to_peer: PeerInfo,
-            ping_hash: bytes, enr_seq: int = 0) -> None:
+    def __init__(
+        self,
+        private_key: PrivateKey,
+        to_peer: PeerInfo,
+        ping_hash: bytes,
+        enr_seq: int = 0
+    ) -> None:
         super().__init__(private_key, 0x02)
         self.to_peer = to_peer
         self.ping_hash = ping_hash
@@ -266,10 +271,9 @@ class PongMessage(MessageV4):
         return [
             self.to_peer.to_RLP(),
             self.ping_hash,
-            timestamp(),
-            # int.to_bytes(self.enr_seq, 8, "big", signed=False)
+            timestamp(),  # int.to_bytes(self.enr_seq, 8, "big", signed=False)
         ]
-    
+
     @classmethod
     def decode(cls, payload: RLP) -> "PongMessage":
         """Decode bytes stream to pong packet and verify.
@@ -292,11 +296,7 @@ class PongMessage(MessageV4):
                 int.from_bytes(payload[3], "big")
             )
         else:
-            return cls(
-                None,
-                PeerInfo.decode(payload[0]),
-                payload[1]
-            )
+            return cls(None, PeerInfo.decode(payload[0]), payload[1])
 
 
 class FindNeighboursMessage(MessageV4):
@@ -310,14 +310,13 @@ class FindNeighboursMessage(MessageV4):
     received, the recipient should reply with Neighbors packets
     containing the closest 16 nodes to target found in its local table.
     """
-
     def __init__(self, private_key: PrivateKey, target: PublicKey) -> None:
         super().__init__(private_key, 0x03)
         self.target = target
-    
+
     def __repr__(self) -> str:
         return "findneighbours-packet v4"
-    
+
     def to_RLP(self) -> RLP:
         """Converted the findneighbour-packet into a bytes list, easy to
         use RLP expression.
@@ -325,11 +324,8 @@ class FindNeighboursMessage(MessageV4):
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        return [
-            self.target.to_bytes(),
-            timestamp()
-        ]
-    
+        return [self.target.to_bytes(), timestamp()]
+
     @classmethod
     def decode(cls, payload: RLP) -> "FindNeighboursMessage":
         """Decode bytes stream to findneighbours packet and verify.
@@ -345,13 +341,8 @@ class FindNeighboursMessage(MessageV4):
             )
         expiration = int.from_bytes(payload[1], byteorder="big")
         if time.time() > expiration:
-            raise ValueError(
-                "The received findneighbours packet has expired."
-            )
-        return cls(
-            None,
-            PublicKey(payload[0])
-        )
+            raise ValueError("The received findneighbours packet has expired.")
+        return cls(None, PublicKey(payload[0]))
 
 
 class NeighboursMessage(MessageV4):
@@ -363,15 +354,13 @@ class NeighboursMessage(MessageV4):
 
     Neighbors is the reply to FindNode.
     """
-
-    def __init__(self, private_key: PrivateKey,
-            nodes: list[PeerInfo]) -> None:
+    def __init__(self, private_key: PrivateKey, nodes: list[PeerInfo]) -> None:
         super().__init__(private_key, 0x04)
         self.nodes = nodes
 
     def __repr__(self) -> str:
         return "neighbours-packet v4"
-    
+
     def to_RLP(self) -> RLP:
         """Converted the neighbour-packet into a bytes list, easy to
         use RLP expression.
@@ -379,11 +368,8 @@ class NeighboursMessage(MessageV4):
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        return [
-            [peer.to_RLP() for peer in self.nodes],
-            timestamp()
-        ]
-    
+        return [[peer.to_RLP() for peer in self.nodes], timestamp()]
+
     @classmethod
     def decode(cls, payload: RLP) -> "NeighboursMessage":
         """Decode bytes stream to neighbours packet and verify.
@@ -398,13 +384,8 @@ class NeighboursMessage(MessageV4):
             )
         expiration = int.from_bytes(payload[1], byteorder="big")
         if time.time() > expiration:
-            raise ValueError(
-                "The received neighbours packet has expired."
-            )
-        return cls(
-            None,
-            [PeerInfo.decode(data) for data in payload[0]]
-        )
+            raise ValueError("The received neighbours packet has expired.")
+        return cls(None, [PeerInfo.decode(data) for data in payload[0]])
 
 
 class ENRRequestMessage(MessageV4):
@@ -417,13 +398,12 @@ class ENRRequestMessage(MessageV4):
     an ENRResponse packet containing the current version of its node
     record.
     """
-
     def __init__(self, private_key: PrivateKey) -> None:
         super().__init__(private_key, 0x05)
 
     def __repr__(self) -> str:
         return "enrrequest-packet v4"
-    
+
     def to_RLP(self) -> RLP:
         """Converted the enrrequest-packet into a bytes list, easy to
         use RLP expression.
@@ -431,10 +411,8 @@ class ENRRequestMessage(MessageV4):
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        return [
-            timestamp()
-        ]
-    
+        return [timestamp()]
+
     @classmethod
     def decode(cls, payload: RLP) -> "ENRRequestMessage":
         """Decode bytes stream to enrrequest packet and verify.
@@ -449,12 +427,8 @@ class ENRRequestMessage(MessageV4):
             )
         expiration = int.from_bytes(payload[0], byteorder="big")
         if time.time() > expiration:
-            raise ValueError(
-                "The received enrrequest packet has expired."
-            )
-        return cls(
-            None
-        )
+            raise ValueError("The received enrrequest packet has expired.")
+        return cls(None)
 
 
 class ENRResponseMessage(MessageV4):
@@ -472,16 +446,16 @@ class ENRResponseMessage(MessageV4):
     The recipient of the packet should verify that the node record is
     signed by the public key which signed the response packet.
     """
-
-    def __init__(self, private_key: PrivateKey, request_hash: bytes,
-            enr: bytes) -> None:
+    def __init__(
+        self, private_key: PrivateKey, request_hash: bytes, enr: bytes
+    ) -> None:
         super().__init__(private_key, 0x06)
         self.request_hash = request_hash
         self.enr = enr
 
     def __repr__(self) -> str:
         return "enrresponse-packet v4"
-    
+
     def to_RLP(self) -> RLP:
         """Converted the enrresponse-packet into a bytes list, easy to
         use RLP expression.
@@ -489,11 +463,8 @@ class ENRResponseMessage(MessageV4):
         :return RLP: A list of bytes conforming to the recursive length
             prefix specification.
         """
-        return [
-            self.request_hash,
-            self.enr
-        ]
-    
+        return [self.request_hash, self.enr]
+
     @classmethod
     def decode(cls, payload: RLP) -> "ENRResponseMessage":
         """Decode bytes stream to enrresponse packet and verify.
@@ -506,11 +477,8 @@ class ENRResponseMessage(MessageV4):
                 "The length of RLP is not enough to generate a"
                 " enrresponse message."
             )
-        return cls(
-            None,
-            payload[0],
-            payload[1]
-        )
+        return cls(None, payload[0], payload[1])
+
 
 MessageV4.MESSAGES = [
     PingMessage,

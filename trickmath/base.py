@@ -2,21 +2,21 @@ def mul_div(a: int, b: int, denominator: int) -> int:
     # because python int have infinite bits, we can
     # calculate result directly without bit trick
     mm = a * b
-    standard_prod0 = mm % (2 ** 256)
-    standard_prod1 = mm // (2 ** 256)
+    standard_prod0 = mm % (2**256)
+    standard_prod1 = mm // (2**256)
     # 512-bit multiply [prod1 prod0] = a * b
     # Compute the product mod 2**256 and mod 2**256 - 1
     # then use the Chinese Remainder Theorem to reconstruct
     # the 512 bit result. The result is stored in two 256
     # variables such that product = prod1 * 2**256 + prod0
-    mm = a * b % 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    mm = a * b % (2**256 - 1)
     # Least significant 256 bits of the product
-    prod0 = a * b % (2 ** 256)
+    prod0 = a * b % (2**256)
     # Most significant 256 bits of the product
     prod1 = mm - prod0 - (1 if mm < prod0 else 0)
     # but to ensure bit trick have the same result as
     # directly calculate, we should have a check
-    if(prod0 != standard_prod0 or prod1 != standard_prod1):
+    if (prod0 != standard_prod0 or prod1 != standard_prod1):
         raise ValueError('trick error!')
 
     # Handle non-overflow cases, 256 by 256 division
@@ -53,7 +53,7 @@ def mul_div(a: int, b: int, denominator: int) -> int:
     # Shift in bits from prod1 into prod0. For this we need
     # to flip `twos` such that it is 2**256 / twos.
     # If twos is zero, then it becomes one
-    twos = (0 - twos) // twos + 1
+    twos = (0-twos) // twos + 1
     prod0 |= prod1 * twos
 
     # Invert denominator mod 2**256
@@ -65,12 +65,18 @@ def mul_div(a: int, b: int, denominator: int) -> int:
     # Now use Newton-Raphson iteration to improve the precision.
     # Thanks to Hensel's lifting lemma, this also works in modular
     # arithmetic, doubling the correct bits in each step.
-    inv *= 2 - denominator * inv; # inverse mod 2**8
-    inv *= 2 - denominator * inv; # inverse mod 2**16
-    inv *= 2 - denominator * inv; # inverse mod 2**32
-    inv *= 2 - denominator * inv; # inverse mod 2**64
-    inv *= 2 - denominator * inv; # inverse mod 2**128
-    inv *= 2 - denominator * inv; # inverse mod 2**256
+    inv *= 2 - denominator*inv
+    # inverse mod 2**8
+    inv *= 2 - denominator*inv
+    # inverse mod 2**16
+    inv *= 2 - denominator*inv
+    # inverse mod 2**32
+    inv *= 2 - denominator*inv
+    # inverse mod 2**64
+    inv *= 2 - denominator*inv
+    # inverse mod 2**128
+    inv *= 2 - denominator*inv
+    # inverse mod 2**256
 
     # Because the division is now exact we can divide by multiplying
     # with the modular inverse of denominator. This will give us the
@@ -85,8 +91,7 @@ def mul_div(a: int, b: int, denominator: int) -> int:
 def mul_div_rounding_up(a: int, b: int, denominator: int) -> int:
     result = mul_div(a, b, denominator)
     if a * b % denominator > 0:
-        if result >= 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:
+        if result >= (2**256 - 1):
             raise ValueError()
         result += 1
     return result
-

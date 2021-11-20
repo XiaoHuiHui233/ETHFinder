@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implementation of core controller of eth protocol.
 """
 
 __author__ = "XiaoHuiHui"
 __version__ = "1.5"
-
 
 from typing import Union
 import logging
@@ -26,7 +24,7 @@ from rlpx import Eth, EthHandler
 from rlpx.protocols.eth import MESSAGE_CODES
 from utils import Promise
 from trickmath import burn
-from store import block, peer
+import store
 import config as opts
 
 logger = logging.getLogger("core.eth")
@@ -40,7 +38,7 @@ sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
 
-RLP = Union[list[list[list[bytes]]] ,list[list[bytes]], list[bytes], bytes]
+RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
 
 CODE_PAIR = {
     MESSAGE_CODES.BLOCK_HEADERS: MESSAGE_CODES.GET_BLOCK_HEADERS,
@@ -71,7 +69,7 @@ class MyEthHandler(EthHandler):
             self.promises: dict[MESSAGE_CODES, Promise[RLP]] = LRU(100)
 
     async def send_get_default(self, code: MESSAGE_CODES,
-            payload: RLP) -> Promise[RLP]:
+                               payload: RLP) -> Promise[RLP]:
         if not self.running:
             logger.warn(
                 f"Failed to send {CODE_PAIR[code]} to {self.rckey}"
@@ -82,14 +80,10 @@ class MyEthHandler(EthHandler):
         if self.version >= 66:
             request_id = uuid.uuid1().int >> 64
             flag = await self.send_message(
-                CODE_PAIR[code],
-                [request_id, payload]
+                CODE_PAIR[code], [request_id, payload]
             )
         else:
-            flag = await self.send_message(
-                CODE_PAIR[code],
-                payload
-            )
+            flag = await self.send_message(CODE_PAIR[code], payload)
         if flag:
             logger.info(f"Send {CODE_PAIR[code]} to {self.rckey}.")
             if self.version >= 66:
@@ -98,9 +92,7 @@ class MyEthHandler(EthHandler):
                 self.promises[code] = promise
             return promise
         else:
-            logger.warn(
-                f"Failed to send {CODE_PAIR[code]} to {self.rckey}."
-            )
+            logger.warn(f"Failed to send {CODE_PAIR[code]} to {self.rckey}.")
             return None
 
     def handle_default(self, code: MESSAGE_CODES, payload: RLP) -> None:
@@ -120,10 +112,10 @@ class MyEthHandler(EthHandler):
                 logger.warn(
                     f"receive {code} from {self.rckey} but no promise."
                 )
-    
+
     async def send_message(self, code: MESSAGE_CODES, data: RLP) -> bool:
         return await self.eth.send_message(code, data)
-    
+
     async def handle_message(self, code: MESSAGE_CODES, data: RLP) -> None:
         # logger.info(
         #     f"{self.rckey}(version: {self.version}) received {code}."
@@ -142,8 +134,7 @@ class MyEthHandler(EthHandler):
                 request_id = data[0]
                 headers = await self.core.get_headers(self.rckey, data[1])
                 await self.send_message(
-                    MESSAGE_CODES.BLOCK_HEADERS,
-                    [request_id, headers]
+                    MESSAGE_CODES.BLOCK_HEADERS, [request_id, headers]
                 )
             else:
                 headers = await self.core.get_headers(self.rckey, data)
@@ -154,21 +145,24 @@ class MyEthHandler(EthHandler):
                 request_id = data[0]
                 bodies = await self.core.get_bodies(self.rckey, data[1])
                 await self.send_message(
-                    MESSAGE_CODES.BLOCK_BODIES,
-                    [request_id, bodies]
+                    MESSAGE_CODES.BLOCK_BODIES, [request_id, bodies]
                 )
             else:
                 bodies = await self.core.get_bodies(self.rckey, data)
                 await self.send_message(MESSAGE_CODES.BLOCK_BODIES, bodies)
-        elif code == [MESSAGE_CODES.GET_RECEIPTS,
-                    MESSAGE_CODES.GET_NODE_DATA,
-                    MESSAGE_CODES.GET_POOLED_TRANSACTIONS]:
+        elif code == [
+            MESSAGE_CODES.GET_RECEIPTS,
+            MESSAGE_CODES.GET_NODE_DATA,
+            MESSAGE_CODES.GET_POOLED_TRANSACTIONS
+        ]:
             pass
-        elif code in [MESSAGE_CODES.BLOCK_HEADERS,
-                    MESSAGE_CODES.BLOCK_BODIES,
-                    MESSAGE_CODES.NODE_DATA,
-                    MESSAGE_CODES.POOLED_TRANSACTIONS,
-                    MESSAGE_CODES.RECEIPTS]:
+        elif code in [
+            MESSAGE_CODES.BLOCK_HEADERS,
+            MESSAGE_CODES.BLOCK_BODIES,
+            MESSAGE_CODES.NODE_DATA,
+            MESSAGE_CODES.POOLED_TRANSACTIONS,
+            MESSAGE_CODES.RECEIPTS
+        ]:
             self.handle_default(code, data)
 
     async def disconnect(self) -> None:
@@ -185,7 +179,7 @@ class EthCore:
         self.block_header_cache: dict[int, RLP] = OrderedDict()
         self.block_body_cache: dict[int, RLP] = OrderedDict()
         self.last_reciept_block = 0
-        self.last_reciept_block_hash = b"\0"   
+        self.last_reciept_block_hash = b"\0"
 
     def on_eth(self, eth: Eth) -> None:
         eth.bind(
@@ -211,14 +205,13 @@ class EthCore:
                 f"Message queue: {self.channel.qsize()}"
             )
             sample = random.sample(
-                list(self.handlers.keys()),
-                min(len(self.handlers), 50)
+                list(self.handlers.keys()), min(len(self.handlers), 50)
             )
             cache = []
             for rckey in sample:
                 if self.handlers[rckey].running:
                     cache.append(rckey)
-            peer.write_peers(cache)
+            store.peer.write_peers(cache)
             await trio.sleep(opts.PRINT_INTERVAL)
 
     def choose_one(self, rckey: str) -> str:
@@ -232,18 +225,17 @@ class EthCore:
     def add_header_cache(self, height: int, cache: RLP) -> None:
         self.block_header_cache[height] = cache
         self.hash_to_height[cache[13]] = height
-        while(len(self.block_header_cache) > 100):
+        while (len(self.block_header_cache) > 100):
             self.block_header_cache.popitem(False)
 
     def add_body_cache(self, height: int, cache: RLP) -> None:
         self.block_body_cache[height] = cache
-        while(len(self.block_body_cache) > 100):
+        while (len(self.block_body_cache) > 100):
             self.block_body_cache.popitem(False)
 
     async def send_get_headers(self, rckey: str, payload: RLP) -> list[RLP]:
         promise = await self.handlers[rckey].send_get_default(
-            MESSAGE_CODES.BLOCK_HEADERS,
-            payload
+            MESSAGE_CODES.BLOCK_HEADERS, payload
         )
         if promise is None:
             return []
@@ -282,14 +274,13 @@ class EthCore:
         if len(headers) == 0:
             # reciept = self.choose_one(rckey)
             # if reciept is None:
-                return []
-            # return await self.send_get_headers(reciept, payload)
+            return []
+        # return await self.send_get_headers(reciept, payload)
         return headers
-            
+
     async def send_get_bodies(self, rckey: str, payload: RLP) -> list[RLP]:
         promise = await self.handlers[rckey].send_get_default(
-            MESSAGE_CODES.BLOCK_BODIES,
-            payload
+            MESSAGE_CODES.BLOCK_BODIES, payload
         )
         if promise is None:
             return []
@@ -313,8 +304,8 @@ class EthCore:
         if len(blocks) == 0:
             # reciept = self.choose_one(rckey)
             # if reciept is None:
-                return []
-            # return await self.send_get_bodies(reciept, payload)
+            return []
+        # return await self.send_get_bodies(reciept, payload)
         return blocks
 
     async def handle_new_block_hash(self, rckey: str, payload: RLP) -> None:
@@ -322,10 +313,7 @@ class EthCore:
             hash = block[0]
             number = int.from_bytes(block[1], "big")
             logger.info(f"received new block hash {number}.")
-            headers = await self.send_get_headers(
-                rckey,
-                [hash, 1, 0, False]
-            )
+            headers = await self.send_get_headers(rckey, [hash, 1, 0, False])
             if len(headers) == 0:
                 logger.warn(f"received empty new headers from {rckey}.")
                 return
@@ -335,14 +323,12 @@ class EthCore:
                 return
             await self.handle_new_block(
                 rckey,
-                [
-                    [headers[0], bodies[0][0], bodies[0][1]],
-                    int.to_bytes(
-                        opts.NOW_TD + int.from_bytes(headers[0][7], "big"),
-                        32,
-                        "big"
-                    )
-                ],
+                [[headers[0], bodies[0][0], bodies[0][1]],
+                 int.to_bytes(
+                     opts.NOW_TD + int.from_bytes(headers[0][7], "big"),
+                     32,
+                     "big"
+                 )],
                 True
             )
             keys = list(self.handlers.keys())
@@ -352,19 +338,23 @@ class EthCore:
                     continue
                 if key in self.handlers:
                     await self.handlers[key].send_message(
-                        MESSAGE_CODES.NEW_BLOCK_HASHES,
-                        payload
+                        MESSAGE_CODES.NEW_BLOCK_HASHES, payload
                     )
 
-    async def waiting_for_receipts(self, rckey: str, block_ts: int,
-            receive_ts: int, height: int, hash: bytes) -> None:
+    async def waiting_for_receipts(
+        self,
+        rckey: str,
+        block_ts: int,
+        receive_ts: int,
+        height: int,
+        hash: bytes
+    ) -> None:
         if height <= self.last_reciept_block:
             return
         if rckey not in self.handlers:
             return
         promise = await self.handlers[rckey].send_get_default(
-            MESSAGE_CODES.RECEIPTS,
-            [hash]
+            MESSAGE_CODES.RECEIPTS, [hash]
         )
         if promise is None:
             return
@@ -395,9 +385,9 @@ class EthCore:
                     )
                     continue
                 typed_receipt = rlp.decode(receipt[1:])
-                if receipt[0] == 0x01: # eip-2930
+                if receipt[0] == 0x01:  # eip-2930
                     logs = typed_receipt[3]
-                elif receipt[0] == 0x02: # eip-1559
+                elif receipt[0] == 0x02:  # eip-1559
                     logs = typed_receipt[3]
                 else:
                     logger.warn(
@@ -417,7 +407,7 @@ class EthCore:
                 sqrt_price = int.from_bytes(log[2][64:96], "big", signed=True)
                 liquidity = int.from_bytes(log[2][96:128], "big", signed=True)
                 tick = int.from_bytes(log[2][128:160], "big", signed=True)
-                logger.info( "Found uniswap log.")
+                logger.info("Found uniswap log.")
                 logger.info(f"Amount0: {amount0}, Amount1: {amount1}")
                 logger.info(f"Sqrt price: {sqrt_price}, tick: {tick}")
                 total_amount0 += amount0
@@ -454,9 +444,10 @@ class EthCore:
                 logger.warn("Failed to put uniswap signal to channel.")
             self.last_reciept_block = height
             self.last_reciept_block_hash = hash
-    
-    async def handle_new_block(self, rckey: str, payload: RLP,
-            active: bool) -> None:
+
+    async def handle_new_block(
+        self, rckey: str, payload: RLP, active: bool
+    ) -> None:
         new_height = int.from_bytes(payload[0][0][8], "big")
         new_td = int.from_bytes(payload[1], "big")
         new_hash = keccak(rlp.encode(payload[0][0]))
@@ -477,10 +468,8 @@ class EthCore:
             opts.NOW_HEIGHT = new_height
             opts.NOW_TD = new_td
             opts.NOW_HASH = new_hash
-            block.write_latest_block(
-                opts.NOW_HEIGHT,
-                opts.NOW_HASH,
-                opts.NOW_TD
+            store.block.write_latest_block(
+                opts.NOW_HEIGHT, opts.NOW_HASH, opts.NOW_TD
             )
             try:
                 self.channel.put_nowait({
@@ -502,8 +491,7 @@ class EthCore:
                         continue
                     if key in self.handlers:
                         await self.handlers[key].send_message(
-                            MESSAGE_CODES.NEW_BLOCK,
-                            payload
+                            MESSAGE_CODES.NEW_BLOCK, payload
                         )
         elif opts.NOW_HEIGHT == new_height and opts.NOW_HASH != new_hash:
             logger.info(f"Found a block conflict ({new_hash.hex()}).")
@@ -517,6 +505,5 @@ class EthCore:
                 continue
             if key in self.handlers:
                 await self.handlers[key].send_message(
-                    MESSAGE_CODES.TX,
-                    payload
+                    MESSAGE_CODES.TX, payload
                 )

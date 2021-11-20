@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """Resolved ENR nodes, ENR trees, ENR root, and ENR branches according
 to the rules defined in EIP-1459.
 
@@ -154,7 +153,7 @@ def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
 
     enrtree-root:v1 e=<enr-root> l=<link-root> seq=<sequence-number>
         sig=<signature>
-    
+
     where
 
     enr-root and link-root refer to the root hashes of subtrees
@@ -166,11 +165,11 @@ def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
     signature is a 65-byte secp256k1 EC signature over the keccak256
         hash of the record content, excluding the sig= part, encoded as
         URL-safe base64.
-    
+
     Further TXT records on subdomains map hashes to one of three entry
     types. The subdomain name of any entry is the base32 encoding of the
     (abbreviated) keccak256 hash of its text content.
-    
+
     See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 
     :param str root: The enr root expression.
@@ -229,8 +228,5 @@ def parse_branch(branch: str) -> list[str]:
         start with BRANCH_PREFIX.
     """
     if not branch.startswith(BRANCH_PREFIX):
-        raise ValueError(
-            f"ENR branch entry must start with '{BRANCH_PREFIX}'"
-        )
+        raise ValueError(f"ENR branch entry must start with '{BRANCH_PREFIX}'")
     return branch[len(BRANCH_PREFIX):].split(",")
-

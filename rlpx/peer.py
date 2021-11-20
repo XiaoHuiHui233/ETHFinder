@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- codeing:utf-8 -*-
-
 """A implemention of the peer in Ethereum p2p network.
 """
 
@@ -51,7 +50,7 @@ class PeerHandler(metaclass=ABCMeta):
     @abstractmethod
     async def disconnection(self) -> None:
         return NotImplemented
-    
+
     @abstractmethod
     async def handle_message(self, data: bytes) -> None:
         return NotImplemented
@@ -60,10 +59,15 @@ class PeerHandler(metaclass=ABCMeta):
 class Peer:
     """
     """
-
-    def __init__(self, private_key: PrivateKey, remote_id: PublicKey,
-            socket_stream: SocketStream, EIP8: bool, waiting_timeout: int,
-            lock_timeout: int) -> None:
+    def __init__(
+        self,
+        private_key: PrivateKey,
+        remote_id: PublicKey,
+        socket_stream: SocketStream,
+        EIP8: bool,
+        waiting_timeout: int,
+        lock_timeout: int
+    ) -> None:
         self.id = private_key.public_key
         self.socket_stream = socket_stream
         self.EIP8 = EIP8
@@ -106,7 +110,7 @@ class Peer:
                 f"Connection to {self.rckey} waiting for auth timeout."
             )
             await self.end()
-        
+
     async def recv_loop(self) -> None:
         try:
             logger.info(f"Start recieving data from {self.rckey}.")
@@ -135,7 +139,7 @@ class Peer:
         if not self.running:
             return
         self.running = False
-        if self.is_auth:  
+        if self.is_auth:
             for handler in self.handlers:
                 try:
                     await handler.disconnection()
@@ -221,9 +225,7 @@ class Peer:
         else:
             auth_non_EIP8 = self.ecies_session.create_auth_non_EIP8()
             result = await self.send(auth_non_EIP8)
-        logger.info(
-            f"Send auth (EIP8: {self.EIP8}) to {self.rckey}."
-        )
+        logger.info(f"Send auth (EIP8: {self.EIP8}) to {self.rckey}.")
         self.state = STATE.ACK
         self.next_packet_size = 210
         return result
@@ -233,13 +235,12 @@ class Peer:
         if not self.ecies_session.got_EIP8_ack:
             if parse_data[0] == 0x04:
                 self.ecies_session.parse_ack_plain(parse_data)
-                logger.info(
-                    f"Received ack (old format) from {self.rckey}."
-                )
+                logger.info(f"Received ack (old format) from {self.rckey}.")
             else:
                 self.ecies_session.got_EIP8_ack = True
-                self.next_packet_size = \
-                        int.from_bytes(self.socket_data[:2], "big") + 2
+                self.next_packet_size = int.from_bytes(
+                    self.socket_data[:2], "big"
+                ) + 2
                 return
         else:
             self.ecies_session.parse_ack_EIP8(parse_data)
@@ -264,7 +265,7 @@ class Peer:
         header = self.ecies_session.create_header(len(msg))
         body = self.ecies_session.create_body(msg)
         return await self.send(header + body)
-    
+
     async def handle_header(self) -> None:
         parse_data = self.socket_data[:self.next_packet_size]
         size = self.ecies_session.parse_header(parse_data)
@@ -278,8 +279,9 @@ class Peer:
         if size % 16 > 0:
             self.next_packet_size += 16 - (size % 16)
 
-    async def safe_handle_message(self, handler: PeerHandler,
-            body: bytes) -> None:
+    async def safe_handle_message(
+        self, handler: PeerHandler, body: bytes
+    ) -> None:
         try:
             await handler.handle_message(body)
         except Exception:
@@ -293,15 +295,11 @@ class Peer:
         parse_data = self.socket_data[:self.next_packet_size]
         self.socket_data = self.socket_data[self.next_packet_size:]
         body = self.ecies_session.parse_body(parse_data)
-        if len(body) == 0:
+        if not body:
             logger.warn(f"Received empty body from {self.rckey}.")
             return
         logger.info(f"Received body from {self.rckey}.")
         self.state = STATE.HEADER
         self.next_packet_size = 32
         for handler in self.handlers:
-            self.peer_loop.start_soon(
-                self.safe_handle_message,
-                handler,
-                body
-            )
+            self.peer_loop.start_soon(self.safe_handle_message, handler, body)
