@@ -11,18 +11,27 @@ import random
 import ujson
 
 MAX_STORE_PEERS = 1000
+first = True
+cache = None
+new_cache = None
 
 
 def read_peers() -> list[tuple[str, int]]:
-    with open("./datas/peer.json", "r") as rf:
-        ls = ujson.load(rf)
-        for d in ls:
-            yield (d["ip"], d["port"])
+    global first, cache, new_cache
+    if first:
+        with open("./datas/peer.json", "r") as rf:
+            ls = ujson.load(rf)
+            cache = list(ls)
+            new_cache = cache
+            first = False
+    for d in cache:
+        yield (d["ip"], d["port"])
+    cache = new_cache
 
 
 def write_peers(peers: list[str]) -> None:
-    for ip, port in read_peers():
-        peers.append(f"{ip}:{port}")
+    global new_cache
+    peers += new_cache
     peers = list(set(peers))
     if len(peers) > MAX_STORE_PEERS:
         peers = random.sample(peers, MAX_STORE_PEERS)
@@ -40,3 +49,4 @@ def write_peers(peers: list[str]) -> None:
                 continue
     with open("./datas/peer.json", "w") as wf:
         ujson.dump(ls, wf, ensure_ascii=False, indent=4)
+    new_cache = peers
