@@ -6,14 +6,16 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 import rlp
 from eth_hash.auto import keccak
 
-from .transaction import Transaction, transaction_from_RLP
+from . import transaction
+from .transaction import Transaction
 
-RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
+
+from utils import RLP
 
 
 class BlockHeader(NamedTuple):
@@ -86,7 +88,7 @@ class BlockBody(NamedTuple):
     def from_RLP(cls, hash: bytes, payload: RLP) -> "BlockBody":
         transactions = []
         for data in payload[0]:
-            transactions.append(transaction_from_RLP(data))
+            transactions.append(transaction.transaction_from_RLP(data))
         ommers = []
         for data in payload[1]:
             ommers.append(BlockHeader.from_RLP(data))

@@ -6,7 +6,8 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 import logging
 from logging import FileHandler, Formatter
 from typing import Union
@@ -19,8 +20,6 @@ from trio import SocketStream, Event, StrictFIFOLock
 
 from .ecies import ECIES
 import utils
-
-RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 logger = logging.getLogger("rlpx.peer")
 fh = FileHandler("./logs/rlpx/peer.log", "w", encoding="utf-8")
@@ -43,15 +42,15 @@ class PeerHandler(metaclass=ABCMeta):
     def bind(self, peer: "Peer") -> None:
         self.peer = peer
 
-    @abstractmethod
+    @abc.abstractmethod
     async def successful_authentication(self) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def disconnection(self) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def handle_message(self, data: bytes) -> None:
         return NotImplemented
 

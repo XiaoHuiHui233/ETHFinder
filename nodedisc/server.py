@@ -9,20 +9,19 @@ __version__ = "2.1"
 
 import logging
 from logging import FileHandler, Formatter
-from ipaddress import IPv4Address, IPv6Address
 import traceback
-from typing import Union
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 
 import trio
 from trio import Nursery, StrictFIFOLock
-from trio.socket import socket, AF_INET, SOCK_DGRAM, SocketType
+from trio import socket
+from trio.socket import SocketType
 
 from .datatypes import PeerInfo
+from utils import IPAddress
 
 BUFF_SIZE = 1280
-
-IPAddress = Union[IPv4Address, IPv6Address]
 
 logger = logging.getLogger("nodedisc.server")
 fh = FileHandler("./logs/nodedisc/server.log", "w", encoding="utf-8")
@@ -41,7 +40,7 @@ class Controller(metaclass=ABCMeta):
     def bind(self, server: "UDPServer") -> None:
         self.server = server
 
-    @abstractmethod
+    @abc.abstractmethod
     async def on_message(data: bytes, address: tuple[str, int]) -> None:
         return NotImplemented
 
@@ -62,7 +61,7 @@ class UDPServer:
 
     async def bind(self, address: str, port: int) -> None:
         """Bind local listening ip and port to UDP socket."""
-        self.server: SocketType = socket(AF_INET, SOCK_DGRAM)
+        self.server: SocketType = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         await self.server.bind((address, port))
         logger.info(f"UDP server bind on {address}:{port}.")
         self.switch = True

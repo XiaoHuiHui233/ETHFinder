@@ -14,7 +14,8 @@ __version__ = "2.1"
 import logging
 from logging import FileHandler, Formatter
 import time
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 import traceback
 
 from lru import LRU
@@ -37,11 +38,11 @@ logger.addHandler(fh)
 class DPTListener(metaclass=ABCMeta):
     """
     """
-    @abstractmethod
+    @abc.abstractmethod
     def on_add_peer(self, id: PublicKey, peer: PeerInfo) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     def on_remove_peer(self, id: PublicKey, peer: PeerInfo) -> None:
         return NotImplemented
 

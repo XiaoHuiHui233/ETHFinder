@@ -13,7 +13,7 @@ import secrets
 
 import trio
 from eth_keys.datatypes import PublicKey
-from parse import parse
+import parse
 
 from nodedisc import DPT, DPTListener, UDPServer, ControllerV4, ListenerV4
 from nodedisc import PeerInfo
@@ -107,7 +107,7 @@ class NodeDiscCore:
 
     async def bootstrap(self, bootnodes: list[str]) -> None:
         for boot_node in bootnodes:
-            id, ip, port = parse("enode://{}@{}:{}", boot_node)
+            id, ip, port = parse.parse("enode://{}@{}:{}", boot_node)
             peer = PeerInfo(ipaddress.ip_address(ip), int(port), int(port))
             await self.controller_v4.ping(peer)
             await trio.sleep(opts.DIFFER_TIME)

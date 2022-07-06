@@ -6,11 +6,11 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 from enum import Enum
 import logging
 from logging import FileHandler, Formatter
-from typing import Union
 import traceback
 
 from eth_keys.datatypes import PublicKey
@@ -21,6 +21,7 @@ import snappy
 
 from ..peer import PeerHandler
 from .datatypes import Capability
+from utils import RLP
 
 logger = logging.getLogger("rlpx.protocols.p2p")
 fh = FileHandler("./logs/rlpx/protocols/p2p.log", "w", encoding="utf-8")
@@ -28,8 +29,6 @@ fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh.setFormatter(fmt)
 fh.setLevel(logging.WARN)
 logger.addHandler(fh)
-
-RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 
 class Protocol(metaclass=ABCMeta):
@@ -50,15 +49,15 @@ class Protocol(metaclass=ABCMeta):
     def __str__(self) -> str:
         return f"{self.name}, {self.version}, {self.length}, {self.offset}"
 
-    @abstractmethod
+    @abc.abstractmethod
     async def after_hello(self) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def handle_message(self, code: int, payload: RLP) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def disconnect(self) -> None:
         return NotImplemented
 
@@ -157,7 +156,7 @@ class HelloMessage:
 class P2pListener(metaclass=ABCMeta):
     """
     """
-    @abstractmethod
+    @abc.abstractmethod
     def on_protocols(self, protocols: list[Protocol]) -> None:
         return NotImplemented
 

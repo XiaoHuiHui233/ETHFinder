@@ -43,7 +43,8 @@ import time
 import logging
 from logging import FileHandler, Formatter
 import ipaddress
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 
 from eth_keys.datatypes import PrivateKey, PublicKey
 import trio
@@ -70,25 +71,25 @@ class ListenerV4(metaclass=ABCMeta):
     def bind(self, controller: "ControllerV4") -> None:
         self.controller = controller
 
-    @abstractmethod
+    @abc.abstractmethod
     async def on_ping_timeout(self, peer: PeerInfo) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def on_pong(self, peer: PeerInfo, id: PublicKey) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def on_find_neighbours(
         self, peer: PeerInfo, target: PublicKey
     ) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def on_neighbours(self, nodes: list[PeerInfo]) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def on_enrresponse(self, enr: bytes) -> None:
         return NotImplemented
 

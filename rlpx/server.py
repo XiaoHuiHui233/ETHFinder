@@ -6,7 +6,8 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 from ipaddress import IPv4Address, IPv6Address
 from typing import Union
 import logging
@@ -21,6 +22,7 @@ from lru import LRU
 
 from .peer import Peer
 import utils
+from utils import IPAddress
 
 logger = logging.getLogger("rlpx.server")
 fh = FileHandler("./logs/rlpx/server.log", "w", encoding="utf-8")
@@ -29,13 +31,11 @@ fh.setFormatter(fmt)
 fh.setLevel(logging.WARN)
 logger.addHandler(fh)
 
-IPAddress = Union[IPv4Address, IPv6Address]
-
 
 class TCPListener(metaclass=ABCMeta):
     """
     """
-    @abstractmethod
+    @abc.abstractmethod
     def on_peer(self, peer: Peer) -> None:
         return NotImplemented
 

@@ -11,7 +11,6 @@ __version__ = "1.6"
 
 import base64
 import ipaddress
-from typing import Union
 
 import parse
 import rlp
@@ -19,13 +18,12 @@ from eth_keys import KeyAPI
 from eth_keys.datatypes import Signature, PublicKey
 from eth_hash.auto import keccak
 
+from utils import RLP, IPAddress
+
 TREE_PREFIX = "enrtree:"
 RECORD_PREFIX = "enr:"
 BRANCH_PREFIX = "enrtree-branch:"
 ROOT_PREFIX = "enrtree-root:"
-
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
-RLP = Union[list[list[bytes]], list[bytes], bytes]
 
 
 def base64_padding(raw: str) -> str:

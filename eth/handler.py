@@ -17,7 +17,7 @@ from trio import Lock
 
 from rlpx import EthHandler
 from rlpx.protocols.eth import MESSAGE_CODES
-from utils import Promise
+from utils import RLP, Promise
 from . import controller
 import config as opts
 
@@ -31,8 +31,6 @@ fh.setLevel(logging.INFO)
 sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
-
-RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
 
 CODE_PAIR = {
     MESSAGE_CODES.BLOCK_HEADERS: MESSAGE_CODES.GET_BLOCK_HEADERS,

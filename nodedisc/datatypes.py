@@ -7,14 +7,12 @@ __author__ = "XiaoHuiHui"
 __version__ = "2.3"
 
 import ipaddress
-from ipaddress import IPv4Address, IPv6Address
-from typing import Union
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 
 from dnsdisc import PeerNetworkInfo
 
-IPAddress = Union[IPv4Address, IPv6Address]
-RLP = Union[list[list[bytes]], list[bytes], bytes]
+from utils import RLP, IPAddress
 
 
 class PeerInfo:
@@ -76,7 +74,7 @@ class Message(metaclass=ABCMeta):
     """The base abstract class of the communication packet of the
     Node Discovery Protocol.
     """
-    @abstractmethod
+    @abc.abstractmethod
     def to_bytes(self) -> bytes:
         """Each subclass should implement this function to convert
         its own information into bytes.

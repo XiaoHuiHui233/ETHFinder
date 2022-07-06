@@ -17,11 +17,12 @@ from decimal import Decimal
 import trio
 from httpx import AsyncClient
 from quart_trio import QuartTrio
+import hypercorn.trio as hypertrio
 from hypercorn.config import Config
-from hypercorn.trio import serve
 
 from store import tick
 import config as opts
+from utils import IPAddress
 
 logger = logging.getLogger("core.service")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
@@ -172,4 +173,4 @@ async def get_tick():
 async def start_web_service() -> None:
     config = Config()
     config.bind = f"{opts.WEB_ADRESS}:{opts.WEB_PORT}"
-    await serve(app, config)
+    await hypertrio.serve(app, config)

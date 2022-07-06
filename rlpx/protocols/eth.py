@@ -6,7 +6,8 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from abc import ABCMeta, abstractmethod
+import abc
+from abc import ABCMeta
 from enum import Enum
 import logging
 from logging import FileHandler, Formatter
@@ -19,8 +20,7 @@ from trio import Event
 from .datatypes import Capability
 from .p2p import DISCONNECT_REASONS, P2p, Protocol
 import config as opts
-
-RLP = Union[list[list[bytes]], list[bytes], bytes]
+from utils import RLP
 
 logger = logging.getLogger("rlpx.protocols.eth")
 fh = FileHandler("./logs/rlpx/protocols/eth.log", "w", encoding="utf-8")
@@ -137,15 +137,15 @@ class EthHandler(metaclass=ABCMeta):
         self.version = eth.version
         self.base_loop = eth.base.peer.peer_loop
 
-    @abstractmethod
+    @abc.abstractmethod
     def after_status(self) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def handle_message(self, code: MESSAGE_CODES, data: RLP) -> None:
         return NotImplemented
 
-    @abstractmethod
+    @abc.abstractmethod
     async def disconnect(self) -> None:
         return NotImplemented
 

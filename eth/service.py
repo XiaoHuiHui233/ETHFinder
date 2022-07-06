@@ -6,7 +6,6 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from typing import Union
 from multiprocessing.connection import Connection
 import uuid
 
@@ -16,10 +15,7 @@ from lru import LRU
 from .datatypes.block import Block
 from .datatypes.transaction import Transaction
 from .datatypes.receipt import Receipt
-from utils import Promise
-
-RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
-
+from utils import RLP, Promise
 
 class EthService:
     """

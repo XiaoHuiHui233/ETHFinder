@@ -9,18 +9,18 @@ __version__ = "1.1"
 import os
 import random
 import struct
-from hashlib import sha256
-from typing import cast
+import hashlib
+import typing
 import secrets
 
-from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat import backends
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ec import \
     EllipticCurvePrivateKeyWithSerialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.constant_time import bytes_eq
-from eth_utils import int_to_big_endian
+from cryptography.hazmat.primitives import constant_time
+import eth_utils
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey, PublicKey, Signature
 from eth_keys.validation import ValidationError
@@ -68,21 +68,21 @@ class InvalidPublicKey(Exception):
 def generate_privkey() -> PrivateKey:
     """Generate a new SECP256K1 private key and return it
     """
-    privkey = cast(
+    privkey = typing.cast(
         EllipticCurvePrivateKeyWithSerialization,
-        ec.generate_private_key(CURVE, default_backend())
+        ec.generate_private_key(CURVE, backends.default_backend())
     )
     return KeyAPI().PrivateKey(
-        pad32(int_to_big_endian(privkey.private_numbers().private_value))
+        pad32(eth_utils.int_to_big_endian(privkey.private_numbers().private_value))
     )
 
 
 def ecdh_agree(privkey: PrivateKey, pubkey: PublicKey) -> bytes:
     """Performs a key exchange operation using the ECDH algorithm.
     """
-    privkey_as_int = int(cast(int, privkey))
+    privkey_as_int = int(typing.cast(int, privkey))
     ec_privkey = ec.derive_private_key(
-        privkey_as_int, CURVE, default_backend()
+        privkey_as_int, CURVE, backends.default_backend()
     )
     pubkey_bytes = b"\x04" + pubkey.to_bytes()
     try:
@@ -90,7 +90,7 @@ def ecdh_agree(privkey: PrivateKey, pubkey: PublicKey) -> bytes:
         pubkey_nums = ec.EllipticCurvePublicKey.from_encoded_point(
             CURVE, pubkey_bytes
         )
-        ec_pubkey = pubkey_nums.public_numbers().public_key(default_backend())
+        ec_pubkey = pubkey_nums.public_numbers().public_key(backends.default_backend())
     except ParseError as exc:
         # Not all bytes can be made into valid public keys, see the
         # warning at
@@ -117,14 +117,14 @@ def encrypt(
     key = kdf(key_material)
     key_enc, key_mac = key[:KEY_LEN // 2], key[KEY_LEN // 2:]
 
-    key_mac = sha256(key_mac).digest()
+    key_mac = hashlib.sha256(key_mac).digest()
     # 3) generate R = rG [same op as generating a public key]
     ephem_pubkey = ephemeral.public_key
 
     # Encrypt
     algo = CIPHER(key_enc)
     iv = os.urandom(algo.block_size // 8)
-    ctx = Cipher(algo, MODE(iv), default_backend()).encryptor()
+    ctx = Cipher(algo, MODE(iv), backends.default_backend()).encryptor()
     ciphertext = ctx.update(data) + ctx.finalize()
 
     # 4) 0x04 || R || AsymmetricEncrypt(shared-secret, plaintext) || tag
@@ -158,14 +158,14 @@ def decrypt(
         ) from exc
     key = kdf(key_material)
     key_enc, key_mac = key[:KEY_LEN // 2], key[KEY_LEN // 2:]
-    key_mac = sha256(key_mac).digest()
+    key_mac = hashlib.sha256(key_mac).digest()
     tag = data[-KEY_LEN:]
 
     # 2) Verify tag
     expected_tag = hmac_sha256(
         key_mac, data[1 + PUBKEY_LEN:-KEY_LEN] + shared_mac_data
     )
-    if not bytes_eq(expected_tag, tag):
+    if not constant_time.bytes_eq(expected_tag, tag):
         raise ParseError("Failed to verify tag")
 
     # 3) Decrypt
@@ -173,7 +173,7 @@ def decrypt(
     blocksize = algo.block_size // 8
     iv = data[1 + PUBKEY_LEN:1 + PUBKEY_LEN + blocksize]
     ciphertext = data[1 + PUBKEY_LEN + blocksize:-KEY_LEN]
-    ctx = Cipher(algo, MODE(iv), default_backend()).decryptor()
+    ctx = Cipher(algo, MODE(iv), backends.default_backend()).decryptor()
     return ctx.update(ciphertext) + ctx.finalize()
 
 
@@ -191,7 +191,7 @@ def kdf(key_material: bytes) -> bytes:
     counter = 0
     while counter <= reps:
         counter += 1
-        ctx = sha256()
+        ctx = hashlib.sha256()
         ctx.update(struct.pack(">I", counter))
         ctx.update(key_material)
         key += ctx.digest()
@@ -199,7 +199,7 @@ def kdf(key_material: bytes) -> bytes:
 
 
 def hmac_sha256(key: bytes, msg: bytes) -> bytes:
-    mac = hmac.HMAC(key, hashes.SHA256(), default_backend())
+    mac = hmac.HMAC(key, hashes.SHA256(), backends.default_backend())
     mac.update(msg)
     return mac.finalize()
 
@@ -310,9 +310,9 @@ class ECIES:
             b"".join((self.ephemeral_shared_secret, shared_secret))
         )
         self.ingress_aes = \
-            Cipher(CIPHER(aes_secret), MODE(IV), default_backend()).decryptor()
+            Cipher(CIPHER(aes_secret), MODE(IV), backends.default_backend()).decryptor()
         self.egress_aes = \
-            Cipher(CIPHER(aes_secret), MODE(IV), default_backend()).decryptor()
+            Cipher(CIPHER(aes_secret), MODE(IV), backends.default_backend()).decryptor()
         mac_secret = keccak(
             b"".join((self.ephemeral_shared_secret, aes_secret))
         )

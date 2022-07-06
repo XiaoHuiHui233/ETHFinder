@@ -6,11 +6,7 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.6"
 
-from typing import Union
-import ipaddress
-
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
-RLP = Union[list[list[bytes]], list[bytes], bytes]
+from utils import IPAddress
 
 
 class PeerNetworkInfo:

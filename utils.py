@@ -6,11 +6,14 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from typing import Generic, TypeVar
+from typing import Generic, Sequence, TypeVar, Union
+from ipaddress import IPv4Address, IPv6Address
 
 from trio import SocketStream, Event
 
 T = TypeVar('T')
+RLP = Union[Sequence["RLP"], int, bytes]
+IPAddress = Union[IPv4Address, IPv6Address]
 
 
 def get_socket_rckey(socket_stream: SocketStream) -> str:

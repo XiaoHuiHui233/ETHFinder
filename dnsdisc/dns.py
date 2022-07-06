@@ -17,7 +17,7 @@ import logging
 import base64
 import traceback
 
-from dns.rdatatype import TXT
+from dns import rdatatype
 from dns.resolver import Answer, Resolver
 from eth_keys.datatypes import PublicKey
 
@@ -64,7 +64,7 @@ def get_txt_record(subdomain: str, context: Context) -> str:
         location = f"{subdomain}.{context.domain}"
     else:
         location = context.domain
-    rrset: Answer = resolver.query(location, TXT).rrset
+    rrset: Answer = resolver.query(location, rdatatype.TXT).rrset
     if rrset is None:
         raise ValueError(
             "Received empty result array while fetching TXT record."

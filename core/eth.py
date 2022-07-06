@@ -6,7 +6,6 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.5"
 
-from typing import Union
 import logging
 from logging import FileHandler, Formatter, StreamHandler
 from collections import OrderedDict
@@ -22,7 +21,7 @@ from lru import LRU
 
 from rlpx import Eth, EthHandler
 from rlpx.protocols.eth import MESSAGE_CODES
-from utils import Promise
+from utils import RLP, Promise
 from pyuniswap import simulation
 import store
 import config as opts
@@ -37,8 +36,6 @@ fh.setLevel(logging.INFO)
 sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
-
-RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
 
 CODE_PAIR = {
     MESSAGE_CODES.BLOCK_HEADERS: MESSAGE_CODES.GET_BLOCK_HEADERS,

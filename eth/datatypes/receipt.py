@@ -10,7 +10,7 @@ from typing import NamedTuple, Union
 
 import rlp
 
-RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
+from utils import RLP
 
 
 class Log(NamedTuple):

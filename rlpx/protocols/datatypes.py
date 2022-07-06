@@ -6,10 +6,9 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from typing import Union, Any
+from typing import Any
 
-RLP = Union[list[list[bytes]], list[bytes], bytes]
-
+from utils import RLP
 
 class Capability:
     """

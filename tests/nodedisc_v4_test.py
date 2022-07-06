@@ -9,9 +9,9 @@ import rlp
 from eth_keys.main import KeyAPI
 from eth_keys.datatypes import PublicKey
 from eth_hash.auto import keccak
-from parse import parse
+import parse
 
-from nodedisc import DPT, Server, ControllerV4, ListenerV4, PeerInfo
+from nodedisc import DPT, UDPServer, ControllerV4, ListenerV4, PeerInfo
 from dnsdisc import dns
 import config as opts
 
@@ -39,7 +39,7 @@ logger.addHandler(sh)
 dpt = DPT(
     opts.PRIVATE_KEY, opts.NODES_PER_KBUCKET, opts.NUM_ROUTING_TABLE_BUCKETS
 )
-server = Server(3)
+server = UDPServer(3)
 rckey_to_id: dict[str, PublicKey] = {}
 
 
@@ -102,7 +102,7 @@ class TestListenerV4(ListenerV4):
 
 async def bootstrap(controller_v4: ControllerV4) -> None:
     for boot_node in opts.BOOTNODES:
-        id, ip, port = parse("enode://{}@{}:{}", boot_node)
+        id, ip, port = parse.parse("enode://{}@{}:{}", boot_node)
         peer = PeerInfo(ipaddress.ip_address(ip), int(port), int(port))
         await controller_v4.ping(peer)
         await trio.sleep(0.1)

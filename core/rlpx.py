@@ -6,8 +6,6 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.1"
 
-from ipaddress import IPv4Address, IPv6Address
-from typing import Union
 import logging
 from logging import Formatter, FileHandler, StreamHandler
 from multiprocessing import Queue
@@ -27,8 +25,6 @@ fh.setLevel(logging.INFO)
 sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
-
-IPAddress = Union[IPv4Address, IPv6Address]
 
 
 class MyTCPListener(TCPListener):

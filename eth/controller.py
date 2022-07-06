@@ -6,7 +6,7 @@
 __author__ = "XiaoHuiHui"
 __version__ = "1.3"
 
-from typing import Union, Any
+from typing import Any
 import logging
 from logging import FileHandler, Formatter, StreamHandler
 import random
@@ -24,6 +24,8 @@ import config as opts
 from .cache import EthCache
 from .handler import MyEthHandler
 
+from utils import RLP
+
 logger = logging.getLogger("eth.controller")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
 fh = FileHandler("./logs/eth/controller.log", "w", encoding="utf-8")
@@ -34,8 +36,6 @@ fh.setLevel(logging.INFO)
 sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
-
-RLP = Union[list[list[list[bytes]]], list[list[bytes]], list[bytes], bytes]
 
 
 class EthController:

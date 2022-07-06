@@ -39,9 +39,8 @@ __author__ = "XiaoHuiHui"
 __version__ = "2.1"
 
 import time
-from ipaddress import IPv4Address, IPv6Address
-from typing import Union
-from abc import abstractmethod
+import abc
+from abc import ABCMeta
 
 import rlp
 from eth_keys import KeyAPI
@@ -49,9 +48,7 @@ from eth_keys.datatypes import PrivateKey, PublicKey, Signature
 from eth_hash.auto import keccak
 
 from ..datatypes import Message, PeerInfo
-
-IPAddress = Union[IPv4Address, IPv6Address]
-RLP = Union[list[list[bytes]], list[bytes], bytes]
+from utils import RLP
 
 
 def timestamp() -> bytes:
@@ -62,7 +59,7 @@ def timestamp() -> bytes:
     return int(time.time()) + 60
 
 
-class MessageV4(Message):
+class MessageV4(Message, metaclass=ABCMeta):
     """The base abstract class of the communication packet of the
     Node Discovery Protocol v4.
     """
@@ -109,7 +106,7 @@ class MessageV4(Message):
         hash = keccak(b"".join((sig, packet_type, packet_data)))
         return b"".join((hash, sig, packet_type, packet_data))
 
-    @abstractmethod
+    @abc.abstractmethod
     def to_RLP(self) -> RLP:
         """Each subclass should implement this function to convert
         its own information into RLP.
