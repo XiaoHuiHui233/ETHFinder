@@ -23,7 +23,7 @@ from lru import LRU
 from rlpx import Eth, EthHandler
 from rlpx.protocols.eth import MESSAGE_CODES
 from utils import Promise
-from trickmath import burn
+from pyuniswap import simulation
 import store
 import config as opts
 
@@ -414,7 +414,7 @@ class EthCore:
                 total_amount1 += amount1
                 flag = True
         if flag:
-            balance0, balance1 = burn(
+            balance0, balance1 = simulation.burn(
                 195000,
                 196620,
                 4621219005768122 + 4270283529460521,
