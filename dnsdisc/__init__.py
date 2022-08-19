@@ -9,15 +9,18 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.6"
+__version__ = "1.8"
 
-import os
+import logging
 
-if not os.path.exists("./logs/dnsdisc"):
-    os.makedirs("./logs/dnsdisc")
+from dnsdisc import resolver
 
-from . import dns
-from . import enr
-from .datatypes import PeerNetworkInfo
+fh = logging.FileHandler("./logs/dnsdisc.log", "w", encoding="utf-8")
+fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+fh.setFormatter(fmt)
+fh.setLevel(logging.WARN)
 
-__all__ = ["dns", "enr", "PeerNetworkInfo"]
+logger = logging.getLogger("dnsdisc")
+logger.addHandler(fh)
+
+__all__ = ["resolver"]

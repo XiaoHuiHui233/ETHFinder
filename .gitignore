@@ -215,3 +215,7 @@ $RECYCLE.BIN/
 
 logs/
 *.log
+
+typings/
+typings/*
+*.pyi

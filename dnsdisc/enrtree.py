@@ -10,15 +10,14 @@ __author__ = "XiaoHuiHui"
 __version__ = "1.6"
 
 import base64
-import ipaddress
 
 import parse
 import rlp
-from eth_keys import KeyAPI
-from eth_keys.datatypes import Signature, PublicKey
 from eth_hash.auto import keccak
+from eth_keys.datatypes import PublicKey, Signature
+from eth_keys.main import KeyAPI
 
-from utils import RLP, IPAddress
+from enr.datatypes import ENR
 
 TREE_PREFIX = "enrtree:"
 RECORD_PREFIX = "enr:"
@@ -44,7 +43,7 @@ def base64_padding(raw: str) -> str:
     :return str: Standard base64 string with paddings.
     """
     missing_padding = len(raw) % 4
-    for i in range(4 - missing_padding):
+    for _ in range(4 - missing_padding):
         raw += "="
     return raw
 
@@ -75,7 +74,7 @@ def parse_tree(tree: str) -> tuple[str, str]:
     return ss[0], ss[1]
 
 
-def parse_and_verify_record(enr: str) -> tuple[IPAddress, int, int]:
+def parse_and_verify_record(enr: str) -> ENR:
     """Parse the enr node record expression and verify it by ecdsa.
     Return an object represents the network infomation of a peer which
     is contained by the enr node expression.
@@ -87,25 +86,8 @@ def parse_and_verify_record(enr: str) -> tuple[IPAddress, int, int]:
 
     See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 
-    The node record is defined by EIP-778. The canonical encoding of a
-    node record is an RLP list of [signature, seq, k, v, ...]. The
-    maximum encoded size of a node record is 300 bytes. Implementations
-    should reject records larger than this size.
-
-    Records are signed and encoded as follows:
-
-    content   = [seq, k, v, ...]
-    signature = sign(content)
-    record    = [signature, seq, k, v, ...]
-
-    See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-778.md
-
     :param str enr: The enr node record expression.
-    :return tuple[IPAddress, int, int]: Ip address, udp port and tcp
-        port of a node.
-    :raise ENRFormatError: If the enr node record expression doesn't
-        start with RECORD_PREFIX or unabled to verify the signature or
-        rlp parsing and ip formatting is failed.
+    :return ENR: The ENR resolvation of the node.
     """
     if not enr.startswith(RECORD_PREFIX):
         raise ValueError(
@@ -115,29 +97,8 @@ def parse_and_verify_record(enr: str) -> tuple[IPAddress, int, int]:
     # ENRs are RLP encoded and written to DNS TXT entries as base64
     # url-safe strings.
     enr_bytes = base64.urlsafe_b64decode(base64_padding(body))
-    result: RLP = rlp.decode(enr_bytes)
-    # The public key of some parsing results is not 65-byte, indicating
-    # that it does not contain recid bits. But the analysis here doesn't
-    # seem to need this bit, just add one bit to it.
-    sig_bytes = bytearray(result[0])
-    if len(sig_bytes) == 64:
-        sig_bytes.append(0)
-    sig = Signature(bytes(sig_bytes))
-    kvs = result[2:]
-    # Convert ENR key/value pairs to object
-    obj: dict[str, bytes] = {}
-    for i in range(0, len(kvs), 2):
-        obj[kvs[i].decode()] = kvs[i + 1]
-    raw_datas = result[1:]
-    msg_hash = keccak(rlp.encode(raw_datas))
-    public_key = PublicKey.from_compressed_bytes(obj["secp256k1"])
-    if not KeyAPI().ecdsa_verify(msg_hash, sig, public_key):
-        raise ValueError("Unable to verify ENR node record signature.")
-    return (
-        ipaddress.ip_address(obj["ip"]),
-        int.from_bytes(obj["udp"], "big"),
-        int.from_bytes(obj["tcp"], "big")
-    )
+    enr_rlp: list[bytes] = rlp.decode(enr_bytes)  # type: ignore
+    return ENR.from_RLP(enr_rlp)
 
 
 def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
@@ -173,19 +134,20 @@ def parse_and_verify_root(root: str, public_key: PublicKey) -> str:
     :param str root: The enr root expression.
     :param public_key: The public key of ENR tree node.
     :return str: The subdomain will be resolved later.
-    :raise ENRFormatError: If the enr node record expression doesn't
-        start with ROOT_PREFIX or unabled to verify the signature.
     """
     if not root.startswith(ROOT_PREFIX):
         raise ValueError(f"ENR root entry must start with '{ROOT_PREFIX}'")
-    e, l, seq, sig = parse.parse(
+    e: str
+    seq: str
+    raw_sig: str
+    e, _, seq, raw_sig = parse.parse(  # type: ignore
         ROOT_PREFIX + "v1 e={} l={} seq={} sig={}",
         root
     )
-    seq = int(seq)
+    int(seq)
     signed_component = root.split(" sig")[0]
     msg_hash = keccak(signed_component.encode())
-    sig = base64.urlsafe_b64decode(base64_padding(sig))
+    sig = base64.urlsafe_b64decode(base64_padding(raw_sig))
     # The public key of some parsing results is not 65-byte, indicating
     # that it does not contain recid bits. But the analysis here doesn't
     # seem to need this bit, just add one bit to it.
@@ -222,8 +184,6 @@ def parse_branch(branch: str) -> list[str]:
     :param str branch: The enr tree branch expression.
     :return list[str] A list of subdomain strings will be resolved
         later.
-    :raise ENRFormatError: If the enr node record expression doesn't
-        start with BRANCH_PREFIX.
     """
     if not branch.startswith(BRANCH_PREFIX):
         raise ValueError(f"ENR branch entry must start with '{BRANCH_PREFIX}'")

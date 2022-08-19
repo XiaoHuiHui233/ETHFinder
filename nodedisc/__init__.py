@@ -31,24 +31,29 @@ See: https://github.com/ethereum/devp2p/blob/master/discv5/discv5.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
+__version__ = "2.2"
 
-import os
+import logging
+from logging import FileHandler, Formatter
 
-if not os.path.exists("./logs/nodedisc"):
-    os.makedirs("./logs/nodedisc")
+from .main import NodeDisc
 
-from .dpt import DPT, DPTListener
-from .server import UDPServer, Controller
-from .discv4.controller import ControllerV4, ListenerV4
-from .datatypes import PeerInfo
+DEBUG = True
 
-__all__ = [
-    "DPT",
-    "DPTListener",
-    "UDPServer",
-    "Controller",
-    "ControllerV4",
-    "ListenerV4",
-    "PeerInfo"
-]
+fh = FileHandler("./logs/nodedisc.log", "w", encoding="utf-8")
+fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+fh.setFormatter(fmt)
+fh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+
+logger = logging.getLogger("nodedisc.discv4")
+logger.addHandler(fh)
+logger = logging.getLogger("nodedisc.dpt")
+logger.addHandler(fh)
+logger = logging.getLogger("nodedisc.kbucket")
+logger.addHandler(fh)
+logger = logging.getLogger("nodedisc.main")
+logger.addHandler(fh)
+logger = logging.getLogger("nodedisc.server")
+logger.addHandler(fh)
+
+__all__ = ["NodeDisc"]

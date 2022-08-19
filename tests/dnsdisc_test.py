@@ -1,18 +1,22 @@
-from dnsdisc import dns
+import sys
 
+sys.path.append("./")
 
-# test for get 2000 peers
-peers = dns.get_peers(
+if True:  # noqa: E401
+    from dnsdisc import resolver
+
+# test for get 2000 enrs
+enrs = resolver.get_enrs(
     "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
     "all.mainnet.ethdisco.net",
-    2000
+    10
 )
 
-# all peers got were stored in this
-rckey_list = []
+# all enrs got were stored in this
+rckey_list: list[str] = []
 
-for peer in peers:
-    rckey_list.append(f"{peer.address}:{peer.udp_port}")
+for enr in enrs:
+    rckey_list.append(f"{enr.content['ip']}:{enr.content['udp']}")
 
 print(
     f"total peers: {len(rckey_list)}, "

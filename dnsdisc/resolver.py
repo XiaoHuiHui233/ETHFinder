@@ -9,27 +9,22 @@ See: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1459.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.12"
 
+import base64
+import logging
 import math
 import random
-import logging
-import base64
 import traceback
+from typing import Optional
 
-from dns import rdatatype
+from dns.rdatatype import TXT
 from dns.resolver import Answer, Resolver
+from enr.datatypes import ENR
 from eth_keys.datatypes import PublicKey
 
-from . import enr
-from .datatypes import PeerNetworkInfo
+from . import enrtree
 
-logger = logging.getLogger("dnsdisc.dns")
-fh = logging.FileHandler("./logs/dnsdisc/dns.log", "w", encoding="utf-8")
-fmt = logging.Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh.setFormatter(fmt)
-fh.setLevel(logging.WARN)
-logger.addHandler(fh)
+logger = logging.getLogger("dnsdisc")
 
 dns_tree_cache: dict[str, str] = {}
 resolver = Resolver()
@@ -39,7 +34,7 @@ class Context:
     """An information class used to implement records in the recursive
     parsing process and verify the legitimacy of the parsing elements.
     """
-    def __init__(self, domain: str, public_key_base64: bytes) -> None:
+    def __init__(self, domain: str, public_key_base64: str) -> None:
         self.domain = domain
         # Base32 strings also need padding.
         public_key_bytes = base64.b32decode(
@@ -55,8 +50,6 @@ def get_txt_record(subdomain: str, context: Context) -> str:
     :param str subdomain: The domain name to be resolved.
     :param Context context: The context of recursive resolution.
     :return str: The result of resolving.
-    :raises EmptyResolvedError: If the result of raw DNS resolution is
-        empty.
     """
     if subdomain in dns_tree_cache:
         return dns_tree_cache[subdomain]
@@ -64,12 +57,13 @@ def get_txt_record(subdomain: str, context: Context) -> str:
         location = f"{subdomain}.{context.domain}"
     else:
         location = context.domain
-    rrset: Answer = resolver.query(location, rdatatype.TXT).rrset
+    answer: Answer = resolver.query(location, TXT)  # type: ignore
+    rrset: Optional[Answer] = answer.rrset   # type: ignore
     if rrset is None:
         raise ValueError(
             "Received empty result array while fetching TXT record."
         )
-    result = b"".join(rrset[0].strings).decode()
+    result = b"".join(rrset[0].strings).decode()  # type: ignore
     if not result:
         raise ValueError("Received empty TXT record.")
     logger.info(f"Successfully resolve domain: {location}")
@@ -86,9 +80,8 @@ def select_random_path(branches: list[str], context: Context) -> str:
     :param Context context: The context of the recording of selected
         branch.
     :return str: A randomly selected branch.
-    :raise UnresolvableError: If all branches have been selected.
     """
-    circular_refs: dict[str, bool] = {}
+    circular_refs: dict[int, bool] = {}
     for idx, subdomain in enumerate(branches):
         if subdomain in context.visits:
             circular_refs[idx] = True
@@ -100,7 +93,7 @@ def select_random_path(branches: list[str], context: Context) -> str:
     return branches[index]
 
 
-def search(subdomain: str, context: Context) -> PeerNetworkInfo:
+def search(subdomain: str, context: Context) -> Optional[ENR]:
     """Recursively search and resolve DNS node sequence, and return
     node information.
 
@@ -120,44 +113,45 @@ def search(subdomain: str, context: Context) -> PeerNetworkInfo:
         analyzed.
     :param Context context: Contextual information passed recursively
         for parsing and analysis.
-    :return PeerNetworkInfo: The analyzed node network information.
+    :return ENR: The analyzed node network information.
     """
     try:
         entry = get_txt_record(subdomain, context)
         context.visits[subdomain] = True
-        if (entry.startswith(enr.RECORD_PREFIX)):
-            ip, udp, tcp = enr.parse_and_verify_record(entry)
-            return PeerNetworkInfo(ip, udp, tcp)
-        elif (entry.startswith(enr.BRANCH_PREFIX)):
-            branches = enr.parse_branch(entry)
+        if (entry.startswith(enrtree.RECORD_PREFIX)):
+            return enrtree.parse_and_verify_record(entry)
+        elif (entry.startswith(enrtree.BRANCH_PREFIX)):
+            branches = enrtree.parse_branch(entry)
             next = select_random_path(branches, context)
             return search(next, context)
-        elif (entry.startswith(enr.ROOT_PREFIX)):
-            next = enr.parse_and_verify_root(entry, context.public_key)
+        elif (entry.startswith(enrtree.ROOT_PREFIX)):
+            next = enrtree.parse_and_verify_root(entry, context.public_key)
             return search(next, context)
+        else:
+            raise ValueError("Not Impossible!")
     except Exception:
         logger.error(f"Errored searching DNS tree at subdomain {subdomain}.")
         logger.error(traceback.format_exc())
 
 
-def get_peers(domain: str, peer_num: int) -> set[PeerNetworkInfo]:
+def get_enrs(domain: str, max: int) -> set[ENR]:
     """Returns a set of nodes resolved by a given DNS domain.
 
     :param str domain: A DNS domain.
     :param int peer_num: The number of peers are wanted to return.
-    :return set[PeerNetworkInfo]: A set of node network information.
+    :return set[ENR]: A set of node network information.
     """
     global dns_tree_cache
     dns_tree_cache = {}
-    peers: set[PeerNetworkInfo] = set()
-    while peer_num > 0:
-        public_key, subdomain = enr.parse_tree(domain)
+    enrs: set[ENR] = set()
+    while max > 0:
+        public_key, subdomain = enrtree.parse_tree(domain)
         context = Context(subdomain, public_key)
-        peer = search(subdomain, context)
-        if peer is not None:
-            peers.add(peer)
-        peer_num -= 1
+        enr_node = search(subdomain, context)
+        if enr_node is not None:
+            enrs.add(enr_node)
+        max -= 1
     logger.info(
-        f"Got {len(peers)} new peer(s) candidate from DNS address={domain}"
+        f"Got {len(enrs)} new ENR(s) candidate from DNS address={domain}"
     )
-    return peers
+    return enrs
