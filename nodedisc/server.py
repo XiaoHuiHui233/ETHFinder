@@ -5,130 +5,84 @@ of Node Discovery Protocol.
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
 
-import logging
-from logging import FileHandler, Formatter
-import traceback
 import abc
+import asyncio
+import ipaddress
+import logging
+import traceback
 from abc import ABCMeta
+from asyncio import BaseTransport, DatagramProtocol, DatagramTransport
+from typing import Any
 
-import trio
-from trio import Nursery, StrictFIFOLock
-from trio import socket
-from trio.socket import SocketType
-
-from .datatypes import PeerInfo
-from utils import IPAddress
-
-BUFF_SIZE = 1280
+from .datatypes import Addr
 
 logger = logging.getLogger("nodedisc.server")
-fh = FileHandler("./logs/nodedisc/server.log", "w", encoding="utf-8")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh.setFormatter(fmt)
-fh.setLevel(logging.WARN)
-logger.addHandler(fh)
+
+MAX_ALLOWED_DATA_LENGTH = 1280
 
 
-class Controller(metaclass=ABCMeta):
-    """
-    """
-    def __init__(self, base_loop: Nursery) -> None:
-        self.base_loop = base_loop
-
-    def bind(self, server: "UDPServer") -> None:
-        self.server = server
-
-    @abc.abstractmethod
-    async def on_message(data: bytes, address: tuple[str, int]) -> None:
-        return NotImplemented
-
-
-class UDPServer:
+class UDPServer(DatagramProtocol):
     """A async UDP socket peer-to-peer node, support node
     discovery procotol v4 and v5.
     """
-    def __init__(self, lock_timeout: float) -> None:
-        self.lock_timeout = lock_timeout
-        self.switch = False
-        self.send_lock = StrictFIFOLock()
+    def __init__(self) -> None:
         self.controllers: list[Controller] = []
 
-    def register_controller(self, controller: Controller) -> None:
+    def register_controller(self, controller: "Controller") -> None:
         controller.bind(self)
         self.controllers.append(controller)
 
-    async def bind(self, address: str, port: int) -> None:
-        """Bind local listening ip and port to UDP socket."""
-        self.server: SocketType = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        await self.server.bind((address, port))
-        logger.info(f"UDP server bind on {address}:{port}.")
-        self.switch = True
-        await self.recv_loop()
+    def connection_made(self, transport: DatagramTransport) -> None:
+        self.transport = transport
 
-    async def handle_message(
-        self, controller: Controller, data: bytes, address: IPAddress
+    def datagram_received(
+        self, data: bytes, addr: tuple[str | Any, int]
     ) -> None:
+        if len(data) > MAX_ALLOWED_DATA_LENGTH:
+            logger.warning(f"Recieved data from {addr}, but too large!")
+            return
         try:
-            await controller.on_message(data, address)
+            new_addr = Addr(ipaddress.ip_address(addr[0]), addr[1])
+            logger.debug(f"Recieved data from {new_addr}.")
+            for controller in self.controllers:
+                controller.on_message(data, new_addr)
         except Exception:
             logger.error(
-                f"Error on calling on_message to controller.\n"
+                f"Error on datagram_received.\n"
                 f"Detail: {traceback.format_exc()}"
             )
 
-    async def recv_loop(self) -> None:
-        """Receiving the information obtained by the UDP listening port
-        in a cyclic blocking mode.
+    def error_received(self, exc: Exception) -> None:
+        logger.warning(
+            f"Error on received data.\nDetail: {traceback.format_exc()}"
+        )
 
-        Thanks to trio, we can use asynchronous coroutines to achieve
-        this, which greatly improves efficiency.
-        """
-        async with trio.open_nursery() as recv_loop:
-            while self.switch:
-                try:
-                    data, address = await self.server.recvfrom(BUFF_SIZE)
-                except Exception:
-                    logger.warn(
-                        f"Error on recv udp packet.\n"
-                        f"Detail:{traceback.format_exc()}"
-                    )
-                    continue
-                logger.info(f"Recieved data from {address[0]}:{address[1]}.")
-                for controller in self.controllers:
-                    recv_loop.start_soon(
-                        self.handle_message, controller, data, address
-                    )
+    def send(self, data: bytes, addr: Addr) -> None:
+        logger.debug(f"Send data to {addr}.")
+        try:
+            self.transport.sendto(data, (str(addr.address), addr.udp_port))
+        except Exception:
+            logger.error(
+                f"Error on sending data to {addr}.\n"
+                f"Detail: {traceback.format_exc()}"
+            )
 
-    async def send(self, peer: PeerInfo, data: bytes) -> None:
-        """Send a message packet to the designated peer network node.
 
-        :param PeerInfo peer: The designated peer network node.
-        :param bytes data: The data is wanted to send.
-        """
-        if self.switch:
-            logger.info(f"Send data to {peer.address}:{peer.udp_port}.")
-            async with self.send_lock:
-                with trio.move_on_after(self.lock_timeout) as cancel_scope:
-                    try:
-                        await self.server.sendto(
-                            data, (str(peer.address), peer.udp_port)
-                        )
-                    except Exception:
-                        # TODO: fix this error
-                        # got socket.gaierror:
-                        # [Errno -9] Address family for hostname not supported
-                        # I don't know why, maybe about ipv6
-                        # but I can pass all exceptions here.
-                        pass
-                if cancel_scope.cancelled_caught:
-                    logger.warn(
-                        "Stop sending after waiting for "
-                        f"{self.lock_timeout} seconds."
-                    )
-        else:
-            logger.warn("Server is not running when recieve a send call.")
+class Controller(metaclass=ABCMeta):
+    def bind(self, server: UDPServer) -> None:
+        self.server = server
 
-    def close(self) -> None:
-        self.switch = False
+    @abc.abstractmethod
+    def on_message(self, data: bytes, addr: Addr) -> None:
+        raise NotImplementedError()
+
+
+async def startup(address: str, port: int) -> tuple[BaseTransport, UDPServer]:
+    loop = asyncio.get_running_loop()
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: UDPServer(),
+        local_addr=(address, port)
+    )
+    logger.info(f"UDP server has been started up on {address}:{port}.")
+    return transport, protocol

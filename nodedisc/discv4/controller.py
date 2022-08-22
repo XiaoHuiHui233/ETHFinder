@@ -36,62 +36,144 @@ See: https://eips.ethereum.org/EIPS/eip-868
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
 
-import traceback
-import time
-import logging
-from logging import FileHandler, Formatter
-import ipaddress
 import abc
+import asyncio
+import logging
+import traceback
+import typing
 from abc import ABCMeta
+from datetime import datetime
+from typing import Optional
 
-from eth_keys.datatypes import PrivateKey, PublicKey
-import trio
-from trio import Nursery, Event
+import rlp
+from enr.datatypes import ENR
+from eth_hash.auto import keccak
+from eth_keys.datatypes import PrivateKey, PublicKey, Signature
+from eth_keys.main import KeyAPI
 from lru import LRU
 
+from ..datatypes import Addr, Node, Peer
 from ..server import Controller
-from ..datatypes import PeerInfo
-from .messages import MessageV4, PingMessage, PongMessage
-from .messages import FindNeighboursMessage, NeighboursMessage
-from .messages import ENRRequestMessage, ENRResponseMessage
+from ..utils import Promise
+from .messages import (ENRRequestMessage, ENRResponseMessage, FindNodeMessage,
+                       NeighboursMessage, PingMessage, PongMessage)
 
 logger = logging.getLogger("nodedisc.discv4")
-fh = FileHandler("./logs/nodedisc/discv4.log", "w", encoding="utf-8")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh.setFormatter(fmt)
-fh.setLevel(logging.WARN)
-logger.addHandler(fh)
+
+TIMEOUT = 5
+
+T1 = PingMessage | PongMessage | FindNodeMessage
+T2 = NeighboursMessage | ENRRequestMessage | ENRResponseMessage
+T = T1 | T2
+
+MESSAGES = [
+    PingMessage,
+    PongMessage,
+    FindNodeMessage,
+    NeighboursMessage,
+    ENRRequestMessage,
+    ENRResponseMessage
+]
+
+
+def now() -> int:
+    return int(datetime.utcnow().timestamp())
+
+
+def pack(data: T, prikey: PrivateKey) -> bytes:
+    """Encapsulate the communication packet according to the
+    specification in Node Discovery Protocol v4.
+
+    Node discovery messages are sent as UDP datagrams. The maximum
+    size of any packet is 1280 bytes.
+
+    packet = packet-header || packet-data
+
+    Every packet starts with a header:
+
+    packet-header = hash || signature || packet-type
+    hash = keccak256(signature || packet-type || packet-data)
+    signature = sign(packet-type || packet-data)
+
+    The hash exists to make the packet format recognizable when
+    running multiple protocols on the same UDP port. It serves no
+    other purpose.
+
+    Every packet is signed by the node's identity key. The signature
+    is encoded as a byte array of length 65 as the concatenation of
+    the signature values r, s and the 'recovery id' v.
+
+    The packet-type is a single byte defining the type of message.
+    Valid packet types are listed below. Data after the header is
+    specific to the packet type and is encoded as an RLP list.
+    Implementations should ignore any additional elements in the
+    packet-data list as well as any extra data after the list.
+
+    See: https://github.com/ethereum/devp2p/blob/master/discv4.md
+    """
+    packet_data: bytes = rlp.encode(data.to_RLP())  # type: ignore
+    packet_type = int.to_bytes(data.TYPE, byteorder="big", length=1)
+    sig = KeyAPI().ecdsa_sign(
+        keccak(b"".join((packet_type, packet_data))), prikey
+    ).to_bytes()
+    hash = keccak(b"".join((sig, packet_type, packet_data)))
+    return b"".join((hash, sig, packet_type, packet_data))
+
+
+def unpack(datas: bytes) -> tuple[bytes, T, PublicKey]:
+    """Analyze the received packet according to the packet format.
+
+    The format of bytes stream as following:
+
+    [0, 32) represents data hash.
+    [32, 96) represents signature.
+    96 represents recoveryId.
+    97 represents packet type.
+    [98, length) represents packet data.
+
+    :param bytes datas: The bytes stream of recieved packet.
+    :return bytes: The hash bytes.
+    :return Message: The packet.
+    :return PublicKey: The public key from sender.
+    """
+    if len(datas) < 98:
+        raise ValueError("Packet size is not large enough.")
+    new_hash_bytes = keccak(datas[32:])
+    raw_hash_bytes = datas[:32]
+    type_id = datas[97]
+    if raw_hash_bytes != new_hash_bytes:
+        raise ValueError("Packet hash verification failed.")
+    packet_data = datas[98:]
+    msg = MESSAGES[type_id - 1].from_RLP(  # type: ignore
+        rlp.decode(packet_data, strict=False)  # type: ignore
+    )
+    sig_hash = keccak(datas[97:])
+    signature = Signature(datas[32:97])
+    public_key = KeyAPI().ecdsa_recover(sig_hash, signature)
+    return raw_hash_bytes, msg, public_key
 
 
 class ListenerV4(metaclass=ABCMeta):
-    """
-    """
-    def bind(self, controller: "ControllerV4") -> None:
-        self.controller = controller
+    @abc.abstractmethod
+    def on_node(self, node: Node, enr_seq: Optional[int]) -> None:
+        raise NotImplementedError()
 
     @abc.abstractmethod
-    async def on_ping_timeout(self, peer: PeerInfo) -> None:
-        return NotImplemented
+    def get_nodes(self, target: PublicKey) -> list[Node]:
+        raise NotImplementedError()
 
     @abc.abstractmethod
-    async def on_pong(self, peer: PeerInfo, id: PublicKey) -> None:
-        return NotImplemented
+    def on_nodes(self, nodes: list[Node]) -> None:
+        raise NotImplementedError()
 
     @abc.abstractmethod
-    async def on_find_neighbours(
-        self, peer: PeerInfo, target: PublicKey
-    ) -> None:
-        return NotImplemented
+    def on_enr(self, id: PublicKey, enr: ENR) -> None:
+        raise NotImplementedError()
 
     @abc.abstractmethod
-    async def on_neighbours(self, nodes: list[PeerInfo]) -> None:
-        return NotImplemented
-
-    @abc.abstractmethod
-    async def on_enrresponse(self, enr: bytes) -> None:
-        return NotImplemented
+    def on_timeout(self, id: PublicKey) -> None:
+        raise NotImplementedError()
 
 
 class ControllerV4(Controller):
@@ -99,48 +181,76 @@ class ControllerV4(Controller):
     """
     def __init__(
         self,
-        base_loop: Nursery,
         private_key: PrivateKey,
-        my_peer: PeerInfo,
-        enr_seq: int,
-        enr: bytes,
-        ping_timeout: float
+        me: ENR
     ) -> None:
-        super().__init__(base_loop)
         self.private_key = private_key
-        self.my_peer = my_peer
-        self.enr_seq = enr_seq
-        self.enr = enr
-        self.ping_timeout = ping_timeout
+        self.me = me
         self.listeners: list[ListenerV4] = []
-        self.requests: dict[bytes, tuple[PeerInfo, Event]] = {}
-        self.last_pong: dict[str, float] = LRU(10000)
+        self.enr_requests: dict[int, PublicKey] = LRU(10000)
+        self.pings: dict[int, Addr] = LRU(10000)
+        self.ping_events: dict[int, Promise[bool]] = LRU(10000)
+        self.last_meets: dict[PublicKey, int] = LRU(10000)
+        self.ban_list: dict[Addr, int] = LRU(10000)
 
     def register_listener(self, listener: ListenerV4) -> None:
-        listener.bind(self)
         self.listeners.append(listener)
 
-    async def waiting_for_pong(self, ping_hash: bytes) -> None:
-        if ping_hash not in self.requests:
-            return
-        with trio.move_on_after(self.ping_timeout) as cancel_scope:
-            await self.requests[ping_hash][1].wait()
-        if cancel_scope.cancelled_caught:
-            if ping_hash not in self.requests:
-                return
-            if self.requests[ping_hash][1].is_set():
-                return
-            for listener in self.listeners:
-                try:
-                    await listener.on_ping_timeout(self.requests[ping_hash][0])
-                except Exception:
-                    logger.error(
-                        f"Error on calling on_ping_timeout to listener.\n"
-                        f"Detail: {traceback.format_exc()}"
-                    )
-            self.requests.pop(ping_hash)
+    def ban(self, addr: Addr) -> None:
+        self.ban_list[addr] = now()
 
-    async def ping(self, peer: PeerInfo) -> None:
+    def has_banned(self, addr: Addr) -> bool:
+        if addr in self.ban_list:
+            last_time = self.ban_list[addr]
+            if now() - last_time > 600:
+                self.ban_list.pop(addr)
+        return addr in self.ban_list
+
+    def timeout(self, id: PublicKey, addr: Addr) -> None:
+        self.ban(addr)
+        for listener in self.listeners:
+            listener.on_timeout(id)
+
+    def send(self, msg: T, addr: Addr) -> bytes:
+        logger.debug(f"Send {msg} to {addr}.")
+        data = pack(msg, self.private_key)
+        self.server.send(data, addr)
+        return data[:32]
+
+    def check_endpoint_proof(self, id: PublicKey) -> bool:
+        return id in self.last_meets and now() - self.last_meets[id] <= 43200
+
+    async def wait_endpoint_proof(self, id: PublicKey, remote: Addr) -> bool:
+        if self.check_endpoint_proof(id):
+            return True
+        promise = await self.waitable_ping(remote)
+        if promise is None:
+            return False
+        return await promise.wait_and_get()
+
+    def update_endpoint_proof(self, id: PublicKey) -> None:
+        self.last_meets[id] = now()
+
+    async def ping_timeout(self, promise: Promise[bool]) -> None:
+        await asyncio.sleep(TIMEOUT)
+        if not promise.is_set():
+            promise.set(False)
+
+    async def waitable_ping(self, addr: Addr) -> Optional[Promise[bool]]:
+        if self.has_banned(addr):
+            return None
+        msg = PingMessage(
+            0x04, Peer.from_ENR(self.me), addr, now()+60, self.me.seq
+        )
+        msg_hash = self.send(msg, addr)
+        h = hash((msg_hash, addr))
+        self.pings[h] = addr
+        promise = Promise[bool]()
+        asyncio.create_task(self.ping_timeout(promise))
+        self.ping_events[h] = promise
+        return promise
+
+    def ping(self, addr: Addr) -> None:
         """Send a ping message packet to the designated peer.
 
         After sending the Ping packet, wait for the pong packet to be
@@ -152,47 +262,163 @@ class ControllerV4(Controller):
         pong packet is received, the record will be deleted to confirm
         that the pong packet has been received during the timeout
         process.
-
-        :param PeerInfo peer: The designated peer network node.
         """
-        msg = PingMessage(self.private_key, self.my_peer, peer)
-        bytes_data = msg.to_bytes()
-        bytes_hash = bytes_data[:32]
-        # Ensure no ping packet sending in a second.
-        if bytes_hash in self.requests:
+        asyncio.create_task(self.waitable_ping(addr))
+
+    def pong(self, ping_hash: bytes, addr: Addr) -> None:
+        if self.has_banned(addr):
             return
-        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port}.")
-        await self.server.send(peer, bytes_data)
-        event = Event()
-        self.requests[bytes_hash] = (peer, event)
-        self.base_loop.start_soon(self.waiting_for_pong, bytes_hash)
+        msg = PongMessage(addr, ping_hash, now()+60, self.me.seq)
+        self.send(msg, addr)
 
-    async def find_neighbours(self, peer: PeerInfo, target: PublicKey) -> None:
+    async def waitable_find_node(
+        self, target: PublicKey, id: PublicKey, addr: Addr
+    ) -> None:
+        if await self.wait_endpoint_proof(id, addr):
+            msg = FindNodeMessage(target, now()+60)
+            self.send(msg, addr)
+        else:
+            self.timeout(id, addr)
+
+    def find_node(
+        self, target: PublicKey, id: PublicKey, addr: Addr
+    ) -> None:
         """Send a findneighbours message packet to the designated peer.
-
-        :param PeerInfo peer: The designated peer network node.
-        :param PublicKey target: The central node id.
         """
-        msg = FindNeighboursMessage(self.private_key, target)
-        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port} ")
-        await self.server.send(peer, msg.to_bytes())
+        if self.has_banned(addr):
+            return
+        asyncio.create_task(
+            self.waitable_find_node(target, id, addr)
+        )
 
-    async def neighbours(self, peer: PeerInfo, nodes: list[PeerInfo]) -> None:
+    def neighbours(self, nodes: list[Node], addr: Addr) -> None:
         """Send a neighbours message packet to the designated peer.
-
-        :param PeerInfo peer: The designated peer network node.
-        :param list[PeerInfo] nodes: The neighbour peers.
         """
-        msg = NeighboursMessage(self.private_key, nodes)
-        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port} ")
-        await self.server.send(peer, msg.to_bytes())
+        if self.has_banned(addr):
+            return
+        msg = NeighboursMessage(nodes, now()+60)
+        self.send(msg, addr)
 
-    async def enr_request(self, peer: PeerInfo) -> None:
-        msg = ENRRequestMessage(self.private_key)
-        logger.info(f"Send {msg} to {peer.address}:{peer.udp_port} ")
-        await self.server.send(peer, msg.to_bytes())
+    async def waitable_enr_request(self, id: PublicKey, addr: Addr) -> None:
+        if await self.wait_endpoint_proof(id, addr):
+            msg = ENRRequestMessage(now()+60)
+            msg_hash = self.send(msg, addr)
+            h = hash((msg_hash, addr))
+            self.enr_requests[h] = id
+        else:
+            self.timeout(id, addr)
 
-    async def on_message(self, data: bytes, address: tuple[str, int]) -> None:
+    def enr_request(self, id: PublicKey, addr: Addr) -> None:
+        if self.has_banned(addr):
+            return
+        asyncio.create_task(self.waitable_enr_request(id, addr))
+
+    def enr_response(self, req_hash: bytes, addr: Addr) -> None:
+        if self.has_banned(addr):
+            return
+        msg = ENRResponseMessage(req_hash, self.me)
+        self.send(msg, addr)
+
+    def on_ping(
+        self, hash: bytes, msg: PingMessage, id: PublicKey, addr: Addr
+    ) -> None:
+        remote = msg.from_peer
+        if remote.address != addr.address or remote.udp_port != addr.udp_port:
+            logger.warning(
+                "The address recorded doesn't match actual address. "
+                f"Recorded: {remote}, Actual: {addr}."
+            )
+            remote = Peer(addr.address, addr.udp_port, msg.from_peer.tcp_port)
+        self.pong(hash, addr)
+        if not self.check_endpoint_proof(id):
+            self.ping(addr)
+        node = Node(remote.address, remote.udp_port, remote.tcp_port, id)
+        for listener in self.listeners:
+            try:
+                listener.on_node(node, msg.enr_seq)
+            except Exception:
+                logger.error(
+                    f"Error on calling on_peer to listener.\n"
+                    f"Detail: {traceback.format_exc()}"
+                )
+
+    def on_pong(self, msg: PongMessage, id: PublicKey, addr: Addr) -> None:
+        h = hash((msg.ping_hash, addr))
+        if h not in self.pings:
+            logger.warning(
+                f"Recieved a pong packet from {addr}, but no corresponding "
+                "ping packet."
+            )
+            return
+        assert h in self.ping_events, "Not impossible!"
+        remote = self.pings.pop(h)
+        if self.ping_events[h].is_set():
+            logger.warning(f"The pong of {addr} is timeout, drop it.")
+            return
+        self.ping_events[h].set(True)
+        if remote != addr:
+            logger.warning(
+                "The address recorded doesn't match actual address. "
+                f"Recorded: {remote}, Actual: {addr}."
+            )
+        self.update_endpoint_proof(id)
+
+    def on_find(self, msg: FindNodeMessage, id: PublicKey, addr: Addr) -> None:
+        if not self.check_endpoint_proof(id):
+            logger.warning(
+                f"The peer {addr}(Id:{id.to_bytes().hex()[:7]}) "
+                "doesn't have endpoint proof but call findnode."
+            )
+            return
+        result: list[Node] = []
+        for listener in self.listeners:
+            try:
+                result += listener.get_nodes(msg.target)
+            except Exception:
+                logger.error(
+                    f"Error on calling on_find_neighbours to listener.\n"
+                    f"Detail: {traceback.format_exc()}"
+                )
+        self.neighbours(result[:16], addr)
+
+    def on_node(self, msg: NeighboursMessage) -> None:
+        for listener in self.listeners:
+            try:
+                listener.on_nodes(msg.nodes)
+            except Exception:
+                logger.error(
+                    f"Error on calling on_neighbours to listener.\n"
+                    f"Detail: {traceback.format_exc()}"
+                )
+
+    def on_enr_req(self, hash: bytes, id: PublicKey, addr: Addr) -> None:
+        if not self.check_endpoint_proof(id):
+            logger.warning(
+                f"The peer {addr}(Id:{id.to_bytes().hex()[:7]}) "
+                "doesn't have endpoint proof but call enr_req."
+            )
+            return
+        self.enr_response(hash, addr)
+
+    def on_enr(self, msg: ENRResponseMessage, addr: Addr) -> None:
+        h = hash((msg.request_hash, addr))
+        if h not in self.enr_requests:
+            logger.warning(
+                f"Recieved a enrresponse packet from {addr}, "
+                "but no corresponding enrrequest packet."
+            )
+            return
+        id = self.enr_requests.pop(h)
+        for listener in self.listeners:
+            try:
+                listener.on_enr(id, msg.enr)
+            except Exception:
+                logger.error(
+                    f"Error on calling on_enr to listener.\n"
+                    f"Detail: {traceback.format_exc()}"
+                )
+
+    def on_message(self, data: bytes, addr: Addr) -> None:
         """Decode the received UDP packets and classify them for
         processing.
 
@@ -210,104 +436,38 @@ class ControllerV4(Controller):
         the endpoint proof procedure.
 
         See: https://github.com/ethereum/devp2p/blob/master/discv4.md
-
-        :param bytes data: Recieved bytes stream.
-        :param address Tuple[str, int]: IP address and port.
         """
-        ip, port = address
-        rckey = f"{ip}:{port}"
-        try:
-            bytes_hash, msg, public_key = MessageV4.unpack(data)
-        except Exception:
-            logger.warn(
-                "Recieved a packet but couldn't parse successfully. "
-                f"From {rckey}. \nDetails: {traceback.format_exc()}"
-            )
+        if self.has_banned(addr):
             return
-        logger.info(
-            f"Received {msg} from {rckey} (peerId: "
-            f"{public_key.to_bytes().hex()[:7]})"
+        try:
+            hash, msg, pubkey = unpack(data)
+        except Exception:
+            logger.error(
+                f"Error on parsing a packet from {addr}.\n"
+                f"Details: {traceback.format_exc()}"
+            )
+            self.ban(addr)
+            return
+        logger.debug(
+            f"Received {msg} from {addr}"
+            f"(peerId: {pubkey.to_bytes().hex()[:7]})"
         )
-        # handle message
-        if isinstance(msg, PingMessage):
-            remote = PeerInfo(
-                ipaddress.ip_address(ip), port, msg.from_peer.tcp_port
-            )
-            new_msg = PongMessage(
-                self.private_key, remote, bytes_hash, self.enr_seq
-            )
-            logger.info(f"Send {new_msg} to {rckey}")
-            await self.server.send(remote, new_msg.to_bytes())
-            for listener in self.listeners:
-                try:
-                    await listener.on_pong(remote, public_key)
-                except Exception:
-                    logger.error(
-                        f"Error on calling on_pong to listener.\n"
-                        f"Detail: {traceback.format_exc()}"
-                    )
-        elif isinstance(msg, PongMessage):
-            if msg.ping_hash in self.requests:
-                self.requests[msg.ping_hash][1].set()
-                self.last_pong[rckey] = time.monotonic()
-                for listener in self.listeners:
-                    self.base_loop.start_soon(
-                        listener.on_pong,
-                        self.requests[msg.ping_hash][0],
-                        public_key
-                    )
-                self.requests.pop(msg.ping_hash)
-            else:
-                logger.warn(
-                    f"Recieved a pong packet from {rckey}, "
-                    "but no corresponding ping packet."
-                )
-        elif isinstance(msg, FindNeighboursMessage):
-            if (
-                rckey in self.last_pong
-                and time.monotonic() - self.last_pong[rckey] > 43200
-            ):
-                return
-            for listener in self.listeners:
-                try:
-                    await listener.on_find_neighbours(
-                        PeerInfo(ipaddress.ip_address(ip), port, 0),
-                        msg.target
-                    )
-                except Exception:
-                    logger.error(
-                        f"Error on calling on_find_neighbours to listener.\n"
-                        f"Detail: {traceback.format_exc()}"
-                    )
-        elif isinstance(msg, NeighboursMessage):
-            for listener in self.listeners:
-                try:
-                    await listener.on_neighbours(msg.nodes)
-                except Exception:
-                    logger.error(
-                        f"Error on calling on_neighbours to listener.\n"
-                        f"Detail: {traceback.format_exc()}"
-                    )
-        elif isinstance(msg, ENRRequestMessage):
-            if (
-                rckey in self.last_pong
-                and time.monotonic() - self.last_pong[rckey] > 43200
-            ):
-                return
-            new_msg = ENRResponseMessage(
-                self.private_key, bytes_hash, self.enr
-            )
-            logger.info(f"Send {new_msg} to {rckey}")
-            await self.server.send(
-                PeerInfo(ipaddress.ip_address(ip), port, 0),
-                new_msg.to_bytes()
-            )
-        elif isinstance(msg, ENRResponseMessage):
-            for listener in self.listeners:
-                try:
-                    await listener.on_enrresponse(msg.enr)
-                except Exception:
-                    logger.error(
-                        f"Error on calling on_enrresponse to listener.\n"
-                        f"Detail: {traceback.format_exc()}"
-                    )
+        match msg.TYPE:
+            case 0x01:
+                msg = typing.cast(PingMessage, msg)
+                self.on_ping(hash, msg, pubkey, addr)
+            case 0x02:
+                msg = typing.cast(PongMessage, msg)
+                self.on_pong(msg, pubkey, addr)
+            case 0x03:
+                msg = typing.cast(FindNodeMessage, msg)
+                self.on_find(msg, pubkey, addr)
+            case 0x04:
+                msg = typing.cast(NeighboursMessage, msg)
+                self.on_node(msg)
+            case 0x05:
+                msg = typing.cast(ENRRequestMessage, msg)
+                self.on_enr_req(hash, pubkey, addr)
+            case 0x06:
+                msg = typing.cast(ENRResponseMessage, msg)
+                self.on_enr(msg, addr)

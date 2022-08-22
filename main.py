@@ -4,21 +4,26 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
 
-from multiprocessing import Process, Queue
+import sys
+
+sys.path.append("./enr")
+sys.path.append("./dnsdisc")
+sys.path.append("./nodedisc")
+
 import logging
 import time
+from multiprocessing import Process, Queue
 
 import trio
 from eth_keys.datatypes import PublicKey
 
-from core.nodedisc import NodeDiscCore
-from core.rlpx import RLPxCore
 from core.eth import EthCore
+from nodedisc.main import NodeDiscCore
+from core.rlpx import RLPxCore
 from core.service import StoreService, start_web_service
-from nodedisc import DPTListener, PeerInfo
-from rlpx import P2pListener, Protocol, Eth
+from nodedisc import DPTListener, Peer
+from rlpx import Eth, P2pListener, Protocol
 
 logging.basicConfig(
     format="%(asctime)s [%(name)s][%(levelname)s] %(message)s",
@@ -36,13 +41,13 @@ class RLPxDPTListener(DPTListener):
     def __init__(self, channel: Queue) -> None:
         self.channel = channel
 
-    def on_add_peer(self, id: PublicKey, peer: PeerInfo) -> None:
+    def on_add_peer(self, id: PublicKey, peer: Peer) -> None:
         try:
             self.channel.put_nowait((id, peer))
         except Exception:
             pass
 
-    def on_remove_peer(self, id: PublicKey, peer: PeerInfo) -> None:
+    def on_remove_peer(self, id: PublicKey, peer: Peer) -> None:
         pass
 
 

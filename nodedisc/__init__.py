@@ -34,26 +34,32 @@ __author__ = "XiaoHuiHui"
 __version__ = "2.2"
 
 import logging
-from logging import FileHandler, Formatter
+from logging import FileHandler, Formatter, StreamHandler
 
 from .main import NodeDisc
+from .dpt import KBucketParams
 
-DEBUG = True
+DEBUG = False
 
+sh = StreamHandler()
 fh = FileHandler("./logs/nodedisc.log", "w", encoding="utf-8")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+sh.setFormatter(fmt)
 fh.setFormatter(fmt)
+sh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
 fh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
-logger = logging.getLogger("nodedisc.discv4")
-logger.addHandler(fh)
-logger = logging.getLogger("nodedisc.dpt")
-logger.addHandler(fh)
-logger = logging.getLogger("nodedisc.kbucket")
-logger.addHandler(fh)
-logger = logging.getLogger("nodedisc.main")
-logger.addHandler(fh)
-logger = logging.getLogger("nodedisc.server")
-logger.addHandler(fh)
+loggers = [
+    logging.getLogger("nodedisc.discv4"),
+    logging.getLogger("nodedisc.dpt"),
+    logging.getLogger("nodedisc.ipc"),
+    logging.getLogger("nodedisc.kbucket"),
+    logging.getLogger("nodedisc.main"),
+    logging.getLogger("nodedisc.server")
+]
 
-__all__ = ["NodeDisc"]
+for logger in loggers:
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+
+__all__ = ["KBucketParams", "NodeDisc"]

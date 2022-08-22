@@ -12,7 +12,6 @@ __version__ = "1.6"
 import base64
 
 import parse
-import rlp
 from eth_hash.auto import keccak
 from eth_keys.datatypes import PublicKey, Signature
 from eth_keys.main import KeyAPI
@@ -93,12 +92,7 @@ def parse_and_verify_record(enr: str) -> ENR:
         raise ValueError(
             f"String encoded ENR must start with '{RECORD_PREFIX}'"
         )
-    body = enr[len(RECORD_PREFIX):]
-    # ENRs are RLP encoded and written to DNS TXT entries as base64
-    # url-safe strings.
-    enr_bytes = base64.urlsafe_b64decode(base64_padding(body))
-    enr_rlp: list[bytes] = rlp.decode(enr_bytes)  # type: ignore
-    return ENR.from_RLP(enr_rlp)
+    return ENR.from_text(enr)
 
 
 def parse_and_verify_root(root: str, public_key: PublicKey) -> str:

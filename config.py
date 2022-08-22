@@ -17,7 +17,7 @@ from eth_hash.auto import keccak
 from eth_keys import KeyAPI
 from eth_keys.datatypes import PrivateKey
 
-from nodedisc import PeerInfo
+from nodedisc import Peer
 from store import block
 
 IPAddress = Union[IPv4Address, IPv6Address]
@@ -50,7 +50,7 @@ PRIVATE_KEY = PrivateKey(secrets.token_bytes(32))
 # PRIVATE_KEY = KeyAPI.PrivateKey(bytes.fromhex(
 #     "15b95cadffae45bb1cf7b8a7f643cbf1a6073ac588e57a88ae0cdb70c35d82fe"
 # ))
-MY_PEER = PeerInfo(
+MY_PEER = Peer(
     ipaddress.ip_address("104.250.52.28"),  # ip address
     30303,  # udp port
     30303  # tcp port

@@ -66,7 +66,7 @@ def get_txt_record(subdomain: str, context: Context) -> str:
     result = b"".join(rrset[0].strings).decode()  # type: ignore
     if not result:
         raise ValueError("Received empty TXT record.")
-    logger.info(f"Successfully resolve domain: {location}")
+    logger.debug(f"Successfully resolve domain: {location}")
     dns_tree_cache[subdomain] = result
     return result
 

@@ -9,88 +9,56 @@ See: https://github.com/ethereum/devp2p/blob/master/discv4.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
 
 import logging
-from logging import FileHandler, Formatter
-import time
-import abc
-from abc import ABCMeta
-import traceback
+from datetime import datetime
+from typing import NamedTuple, Optional
 
-from lru import LRU
-from eth_keys.datatypes import PrivateKey, PublicKey
 from eth_hash.auto import keccak
+from eth_keys.datatypes import PrivateKey, PublicKey
 
-from .datatypes import PeerInfo
+from .datatypes import Node
 from .kbucket import KademliaRoutingTable
 
-DIFF_TIME = 0.2
-
 logger = logging.getLogger("nodedisc.dpt")
-fh = FileHandler("./logs/nodedisc/dpt.log", "w", encoding="utf-8")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh.setFormatter(fmt)
-fh.setLevel(logging.WARN)
-logger.addHandler(fh)
 
 
-class DPTListener(metaclass=ABCMeta):
-    """
-    """
-    @abc.abstractmethod
-    def on_add_peer(self, id: PublicKey, peer: PeerInfo) -> None:
-        return NotImplemented
+def now() -> int:
+    return int(datetime.utcnow().timestamp())
 
-    @abc.abstractmethod
-    def on_remove_peer(self, id: PublicKey, peer: PeerInfo) -> None:
-        return NotImplemented
+
+class KBucketParams(NamedTuple):
+    bucket_nodes: int
+    num_buckets: int
 
 
 class DPT:
     """A class represents distributed peer table."""
-    def __init__(
-        self,
-        private_key: PrivateKey,
-        bucket_nodes: int,
-        num_buckets: int,
-        max_closest: int
-    ) -> None:
+    def __init__(self, private_key: PrivateKey, params: KBucketParams) -> None:
         self.private_key = private_key
         self.id = private_key.public_key
-        self.max_closest = max_closest
-        logger.info(f"DPT running with node key: {self.id}")
+        logger.info(f"DPT running with node key: 0x{self.id.to_bytes().hex()}")
         self.kbucket = KademliaRoutingTable(
-            keccak(self.id.to_bytes()), bucket_nodes, num_buckets
+            keccak(self.id.to_bytes()),
+            params.bucket_nodes,
+            params.num_buckets
         )
-        self.peers: dict[bytes, tuple[PublicKey, PeerInfo]] = {}
-        self.banlist: dict[PublicKey, float] = LRU(10000)
-        self.listeners: list[DPTListener] = []
+        self.nodes: dict[bytes, Node] = {}
 
     def __len__(self) -> int:
-        return len(self.peers)
+        return len(self.nodes)
 
-    def __contains__(self, peer_id: PublicKey) -> bool:
-        id_hash = keccak(peer_id.to_bytes())
-        if id_hash in self.kbucket:
-            if id_hash in self.peers:
-                return True
-            else:
-                self.kbucket.remove(id_hash)
-                logger.warn(
-                    f"{peer_id} was not in peers dict, "
-                    "but in kbucket!"
-                )
-        elif id_hash in self.peers:
-            self.peers.pop(id_hash)
-            logger.warn(f"{peer_id} was not in kbucket, " "but in peers dict!")
-        return False
+    def __contains__(self, id: PublicKey) -> bool:
+        id_bytes = id.to_bytes()
+        id_hash = keccak(id_bytes)
+        assert (
+            (id_hash in self.kbucket and id_hash in self.nodes) or
+            (id_hash not in self.kbucket and id_hash not in self.nodes)
+        ), f"Incnsistency: {id_bytes.hex()[:7]}"
+        return id_hash in self.nodes
 
-    def register_listener(self, listener: DPTListener) -> None:
-        self.listeners.append(listener)
-
-    def add_peer(self, peer: PeerInfo, id: PublicKey) -> None:
-        """Add a peer to the DHT.
+    def add(self, node: Node) -> Optional[Node]:
+        """Add a node to the DHT.
 
         When a certain sub-table of the DHT table is full, adding an
         element will replace the least used element and delete it. This
@@ -104,123 +72,65 @@ class DPT:
         bucket, N₂, needs to be revalidated by sending a Ping packet. If
         no reply is received from N₂ it is considered dead, removed and
         N₁ added to the front of the bucket.
+        """
+        assert node.id != self.id, "Can't add self to DHT."
+        id_bytes = node.id.to_bytes()
+        id_hash = keccak(id_bytes)
+        if id_hash in self.nodes:
+            assert(
+                id_hash in self.kbucket
+            ), f"Incnsistency: {id_bytes.hex()[:7]}"
+            logger.info(f"Node {node} is in DHT.")
+            return
+        logger.info(f"Node {node} was added to DHT.")
+        old_id_hash = self.kbucket.update(id_hash)
+        self.nodes[id_hash] = node
+        if old_id_hash is not None:
+            self.kbucket.remove(old_id_hash)
+            old_node = self.nodes.pop(old_id_hash)
+            return old_node
 
-        :param PeerInfo peer: The peer to be added.
-        :return PeerInfo: Peer was kicked or None.
+    def remove(self, id: PublicKey) -> Optional[Node]:
+        """Remove a node by the given id.
+
+        :param PublicKey id: The given id.
         """
         if id == self.id:
-            logger.warn("You can't add self into DHT.")
+            logger.warning("You can't remove self from DHT.")
             return
-        if id in self.banlist:
-            if time.monotonic() - self.banlist[id] < 300:
-                logger.warn(
-                    f"Peer id {id.to_bytes().hex()[:7]} is in ban list."
-                )
-                return
-            else:
-                del self.banlist[id]
-        if peer.tcp_port == 0:
-            logger.warn(f"Peer id {id.to_bytes().hex()[:7]} has no tcp port.")
-            return
-        id_hash = keccak(id.to_bytes())
-        if id_hash in self.kbucket:
-            logger.warn(f"Peer id {id.to_bytes().hex()[:7]} is in DHT.")
-            return
-        logger.info(f"Peer id {id.to_bytes().hex()[:7]} was added to DHT.")
-        old = self.kbucket.update(id_hash)
-        self.peers[id_hash] = (id, peer)
-        for listener in self.listeners:
-            try:
-                listener.on_add_peer(id, peer)
-            except Exception:
-                logger.error(
-                    f"Error on calling on_add_peer to listener.\n"
-                    f"Detail: {traceback.format_exc()}"
-                )
-        if old is None:
-            return None
-        else:
-            id, old_peer = self.peers[old]
-            self.remove_peer(id)
-            return old_peer
-
-    def remove_peer(self, peer_id: PublicKey) -> None:
-        """Remove a peer by the given id.
-
-        :param PublicKey peer_id: The given id.
-        """
-        if peer_id == self.id:
-            logger.warn("You can't remove self from DHT.")
-            return
-        id_hash = keccak(peer_id.to_bytes())
-        if id_hash in self.kbucket:
+        id_bytes = id.to_bytes()
+        id_hash = keccak(id_bytes)
+        id_str = id_bytes.hex()[:7]
+        if id_hash in self.nodes:
+            assert(
+                id_hash in self.kbucket
+            ), f"Incnsistency: {id_bytes.hex()[:7]}"
             self.kbucket.remove(id_hash)
-            if id_hash in self.peers:
-                logger.info(
-                    f"Peer id {peer_id.to_bytes().hex()[:7]} "
-                    "was removed from DHT."
-                )
-                for listener in self.listeners:
-                    try:
-                        listener.on_remove_peer(
-                            self.peers[id_hash][0], self.peers[id_hash][1]
-                        )
-                    except Exception:
-                        logger.error(
-                            f"Error on calling on_remove_peer to listener.\n"
-                            f"Detail: {traceback.format_exc()}"
-                        )
-                self.peers.pop(id_hash)
-            else:
-                logger.warn(
-                    f"{peer_id.to_bytes().hex()[:7]} was not in kbucket, "
-                    "but in peers dict!"
-                )
-        elif id_hash in self.peers:
-            self.peers.pop(id_hash)
-            logger.warn(
-                f"{peer_id.to_bytes().hex()[:7]} was not in peers dict, "
-                "but in kbucket!"
-            )
+            return self.nodes.pop(id_hash)
+        else:
+            assert(
+                id_hash not in self.kbucket
+            ), f"Incnsistency: {id_bytes.hex()[:7]}"
+            logger.warning(f"Peer id {id_str} is not in DHT.")
 
-    def ban_peer(self, peer_id: PublicKey) -> None:
-        """Add a peer to the banned list.
-
-        :param PublicKey peer_id: The public key of the peer to be
-            banned.
-        """
-        if peer_id == self.id:
-            logger.warn("You can't ban self peer from DHT.")
-            return
-        logger.info(f"Peer id {peer_id.to_bytes().hex()[:7]} was banned.")
-        self.banlist[peer_id] = time.monotonic()
-        self.remove_peer(peer_id)
-
-    def get_peer(self, peer_id: PublicKey) -> PeerInfo:
-        """Obtain the peer object from the DHT by the given id.
-
-        :param PublicKey peer_id: The given id.
-        """
-        id_hash = keccak(peer_id.to_bytes())
-        if id_hash in self.peers:
-            return self.peers[id_hash][1]
-        return None
-
-    def get_peers(self) -> list[PeerInfo]:
+    def all(self, limit: int = -1) -> list[Node]:
         """Get all of peers from the DHT.
 
         :return list[PeerInfo]: A list of peers.
         """
-        return [self.peers[i][1] for i in self.kbucket.list_all_random()]
+        r = list(self.nodes.values())
+        return r[:min(len(r), limit)]
 
-    def get_closest_peers(self, id: PublicKey) -> list[PeerInfo]:
+    def shuffle_all(self, limit: int = -1) -> list[Node]:
+        r = [self.nodes[i] for i in self.kbucket.list_all_random()]
+        return r[:min(len(r), limit)]
+
+    def closest(self, id: PublicKey, limit: int = -1) -> list[Node]:
         """Get the ids of the peers closest to the given id.
 
         :param PublicKey id: The given id.
         :return list[PeerInfo]: A list of peers closest to the given id.
         """
         id_hash = keccak(id.to_bytes())
-        all_around = [
-            self.peers[i][1] for i in self.kbucket.list_nodes_around(id_hash)
-        ]
-        return all_around[:min(len(all_around), self.max_closest)]
+        r = [self.nodes[i] for i in self.kbucket.list_nodes_around(id_hash)]
+        return r[:min(len(r), limit)]

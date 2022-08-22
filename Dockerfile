@@ -4,4 +4,4 @@ WORKDIR /app
 RUN pip install -r requirements.txt
 COPY ./ /app
 ENV PYTHONUNBUFFERED 0
-ENTRYPOINT ["python", "-u", "main.py"]
+ENTRYPOINT ["python", "-u", "./tests/test.py"]
