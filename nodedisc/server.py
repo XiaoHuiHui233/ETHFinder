@@ -40,11 +40,11 @@ class UDPServer(DatagramProtocol):
         self, data: bytes, addr: tuple[str | Any, int]
     ) -> None:
         if len(data) > MAX_ALLOWED_DATA_LENGTH:
-            logger.warning(f"Recieved data from {addr}, but too large!")
+            logger.warning(f"received data from {addr}, but too large!")
             return
         try:
             new_addr = Addr(ipaddress.ip_address(addr[0]), addr[1])
-            logger.debug(f"Recieved data from {new_addr}.")
+            logger.debug(f"received data from {new_addr}.")
             for controller in self.controllers:
                 controller.on_message(data, new_addr)
         except Exception:

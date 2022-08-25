@@ -1,13 +1,14 @@
 import asyncio
 import logging
-import secrets
 import sys
 
+import uvloop
 from eth_keys.datatypes import PrivateKey
 
 sys.path.append("./")
 
 if True:  # noqa: E401
+    import forks
     from enr.datatypes import ENR
     from nodedisc import KBucketParams, NodeDisc
 
@@ -20,9 +21,21 @@ logging.basicConfig(
     ]
 )
 
-PRIVATE_KEY = PrivateKey(secrets.token_bytes(32))
+PRIVATE_KEY = PrivateKey(
+    bytes.fromhex(
+        "9cc81c95762e34d3dbc2bade47ca93c176823193809ad1bb05b0b0976ae24187"
+    )
+)
 SEQ = 1
-ME = ENR.from_sign(PRIVATE_KEY, SEQ, "104.250.52.28", 30304, 30304)
+ME = ENR.from_sign(
+    PRIVATE_KEY,
+    SEQ,
+    "104.250.52.28",
+    30304,
+    30304,
+    forks.fork_hash,
+    forks.fork_next
+)
 
 DNS_NETWORKS = [
     "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
@@ -48,12 +61,15 @@ async def test() -> None:
         200,
         PRIVATE_KEY,
         ME,
-        KBucketParams(16, 256),
+        KBucketParams(200, 256),
+        DNS_NETWORKS,
+        BOOTNODES,
         "/tmp/nodedisc",
         "./datas/peers"
     )
-    await nodedisc.bind("0.0.0.0", 30304, BOOTNODES, DNS_NETWORKS)
+    await nodedisc.bind("0.0.0.0", 30304)
     await nodedisc.run()
 
 
+uvloop.install()
 asyncio.run(test())

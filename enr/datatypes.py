@@ -53,6 +53,10 @@ class ENRContent(TypedDict):
     udp6: Optional[int]
 
 
+class ETHEntry(TypedDict):
+    eth: list[tuple[bytes, int]]
+
+
 def _decode_port(data: bytes) -> int:
     port = int.from_bytes(data, "big", signed=False)
     if port <= 0 or port > 65535:
@@ -62,7 +66,7 @@ def _decode_port(data: bytes) -> int:
 
 def _decode_enr_content(
     data: dict[str, bytes]
-) -> tuple[ENRContent, dict[str, Any]]:
+) -> tuple[ENRContent, Optional[ETHEntry], dict[str, Any]]:
     content: ENRContent = {
         "id":
         data["id"].decode(),
@@ -84,32 +88,55 @@ def _decode_enr_content(
         "udp6":
         None if "udp6" not in data else _decode_port(data["udp6"]),
     }
+    eth: Optional[ETHEntry] = None
+    if "eth" in data:
+        eth_data = typing.cast(list[tuple[bytes, bytes]], data["eth"])
+        eth = {
+            "eth": [
+                (
+                    eth_data[0][0],
+                    int.from_bytes(eth_data[0][1], "big", signed=False)
+                )
+            ]
+        }
     extra = {}
     for key in data:
         if key not in (
-            "id", "secp256k1", "ip", "tcp", "udp", "ip6", "tcp6", "udp6"
+            "id", "secp256k1", "ip", "tcp", "udp", "ip6", "tcp6", "udp6", "eth"
         ):
             extra[key] = data[key]
-    return content, extra
+    return content, eth, extra
 
 
 class ENR(NamedTuple):
     signature: Signature
     seq: int
     content: ENRContent
+    eth: Optional[ETHEntry]
     extra: dict[str, Any]
     order: list[str]
 
     def __hash__(self) -> int:
         return hash(self.signature) ^ hash(self.seq)
 
-    def to_RLP(self) -> list[int | bytes | str]:
-        r: list[int | bytes | str] = [
+    def __eq__(self, other: object) -> bool:
+        other = typing.cast(ENR, other)
+        try:
+            return self.signature == other.signature and self.seq == other.seq
+        except Exception:
+            return False
+
+    def to_RLP(self) -> list[int | bytes | str | list[tuple[bytes, int]]]:
+        r: list[int | bytes | str | list[tuple[bytes, int]]] = [
             self.signature.to_bytes()[:-1],
             self.seq,
         ]
         for key in self.order:
-            if key in self.content:
+            if key == "eth":
+                r.append(key)
+                assert self.eth is not None
+                r.append(self.eth["eth"])
+            elif key in self.content:
                 if self.content[key] is None:
                     continue
                 r.append(key)
@@ -152,12 +179,12 @@ class ENR(NamedTuple):
         for i in range(0, len(kvs), 2):
             order.append(kvs[i].decode())
             obj[kvs[i].decode()] = kvs[i + 1]
-        content, extra = _decode_enr_content(obj)
+        content, eth, extra = _decode_enr_content(obj)
         if content["secp256k1"] is not None:
             assert (
                 KeyAPI().ecdsa_verify(msg_hash, sig, content["secp256k1"])
             ), "Unable to verify ENR node record signature."
-        return cls(sig, seq, content, extra, order)
+        return cls(sig, seq, content, eth, extra, order)
 
     @classmethod
     def from_text(cls, text: str) -> "ENR":
@@ -174,7 +201,9 @@ class ENR(NamedTuple):
         seq: int,
         ip: str,
         udp_port: int,
-        tcp_port: int
+        tcp_port: int,
+        fork_hash: bytes,
+        fork_next: int
     ) -> "ENR":
         pubkey = prikey.public_key
         content = [
@@ -205,6 +234,9 @@ class ENR(NamedTuple):
                 "tcp6": None,
                 "udp6": None
             },
+            {
+                "eth": [(fork_hash, fork_next)]
+            },
             {},
-            ["id", "secp256k1", "tcp", "udp"]
+            ["eth", "id", "secp256k1", "tcp", "udp"]
         )

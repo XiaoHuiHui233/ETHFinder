@@ -34,7 +34,7 @@ class IPCConnection:
     async def bind(self) -> None:
         while not self.reader.at_eof():
             data = await self.reader.readline()
-            logger.debug(f"Recieved {data.decode()}")
+            logger.debug(f"received {data.decode()}")
             try:
                 d = ujson.loads(data.decode())
                 self.receive(d)

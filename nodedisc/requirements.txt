@@ -4,3 +4,4 @@ lru-dict>=1.1.7
 parse>=1.19.0
 rlp>=3.0.0
 ujson>=5.4.0
+uvloop>=0.16.0

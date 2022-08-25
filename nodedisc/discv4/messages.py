@@ -369,7 +369,9 @@ class ENRResponseMessage(NamedTuple):
     def __repr__(self) -> str:
         return "enrresponse-packet v4"
 
-    def to_RLP(self) -> list[bytes | list[int | bytes | str]]:
+    def to_RLP(
+        self
+    ) -> list[bytes | list[int | bytes | str | list[tuple[bytes, int]]]]:
         """Converted the enrresponse-packet into a bytes list, easy to
         use RLP expression.
 
@@ -393,9 +395,7 @@ class ENRResponseMessage(NamedTuple):
                 " enrresponse message."
             )
         if len(payload[1]) > 300:
-            raise ValueError(
-                "ENR data should be not large than 300 bytes."
-            )
+            raise ValueError("ENR data should be not large than 300 bytes.")
         return cls(
             typing.cast(bytes, payload[0]),
             ENR.from_RLP(typing.cast(list[bytes], payload[1]))

@@ -132,7 +132,7 @@ def unpack(datas: bytes) -> tuple[bytes, T, PublicKey]:
     97 represents packet type.
     [98, length) represents packet data.
 
-    :param bytes datas: The bytes stream of recieved packet.
+    :param bytes datas: The bytes stream of received packet.
     :return bytes: The hash bytes.
     :return Message: The packet.
     :return PublicKey: The public key from sender.
@@ -157,6 +157,10 @@ def unpack(datas: bytes) -> tuple[bytes, T, PublicKey]:
 class ListenerV4(metaclass=ABCMeta):
     @abc.abstractmethod
     def on_node(self, node: Node, enr_seq: Optional[int]) -> None:
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def on_reply(self, id: PublicKey, addr: Addr) -> None:
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -188,6 +192,7 @@ class ControllerV4(Controller):
         self.me = me
         self.listeners: list[ListenerV4] = []
         self.enr_requests: dict[int, PublicKey] = LRU(10000)
+        self.pinging: dict[Addr, bool] = LRU(10000)
         self.pings: dict[int, Addr] = LRU(10000)
         self.ping_events: dict[int, Promise[bool]] = LRU(10000)
         self.last_meets: dict[PublicKey, int] = LRU(10000)
@@ -223,6 +228,9 @@ class ControllerV4(Controller):
     async def wait_endpoint_proof(self, id: PublicKey, remote: Addr) -> bool:
         if self.check_endpoint_proof(id):
             return True
+        if remote in self.pinging:
+            await asyncio.sleep(TIMEOUT)
+            return self.check_endpoint_proof(id)
         promise = await self.waitable_ping(remote)
         if promise is None:
             return False
@@ -231,10 +239,17 @@ class ControllerV4(Controller):
     def update_endpoint_proof(self, id: PublicKey) -> None:
         self.last_meets[id] = now()
 
-    async def ping_timeout(self, promise: Promise[bool]) -> None:
+    async def ping_timeout(self, hash: int, addr: Addr) -> None:
         await asyncio.sleep(TIMEOUT)
-        if not promise.is_set():
-            promise.set(False)
+        if hash not in self.pings:
+            return
+        assert hash in self.ping_events
+        assert addr in self.pinging
+        if not self.ping_events[hash].is_set():
+            self.ping_events[hash].set(False)
+        self.pings.pop(hash)
+        self.ping_events.pop(hash)
+        self.pinging.pop(addr)
 
     async def waitable_ping(self, addr: Addr) -> Optional[Promise[bool]]:
         if self.has_banned(addr):
@@ -245,9 +260,9 @@ class ControllerV4(Controller):
         msg_hash = self.send(msg, addr)
         h = hash((msg_hash, addr))
         self.pings[h] = addr
-        promise = Promise[bool]()
-        asyncio.create_task(self.ping_timeout(promise))
-        self.ping_events[h] = promise
+        self.ping_events[h] = promise = Promise[bool]()
+        self.pinging[addr] = True
+        asyncio.create_task(self.ping_timeout(h, addr))
         return promise
 
     def ping(self, addr: Addr) -> None:
@@ -263,6 +278,10 @@ class ControllerV4(Controller):
         that the pong packet has been received during the timeout
         process.
         """
+        if self.has_banned(addr):
+            return
+        if addr in self.pinging:
+            return
         asyncio.create_task(self.waitable_ping(addr))
 
     def pong(self, ping_hash: bytes, addr: Addr) -> None:
@@ -274,6 +293,8 @@ class ControllerV4(Controller):
     async def waitable_find_node(
         self, target: PublicKey, id: PublicKey, addr: Addr
     ) -> None:
+        if self.has_banned(addr):
+            return None
         if await self.wait_endpoint_proof(id, addr):
             msg = FindNodeMessage(target, now()+60)
             self.send(msg, addr)
@@ -300,6 +321,8 @@ class ControllerV4(Controller):
         self.send(msg, addr)
 
     async def waitable_enr_request(self, id: PublicKey, addr: Addr) -> None:
+        if self.has_banned(addr):
+            return None
         if await self.wait_endpoint_proof(id, addr):
             msg = ENRRequestMessage(now()+60)
             msg_hash = self.send(msg, addr)
@@ -328,7 +351,7 @@ class ControllerV4(Controller):
                 "The address recorded doesn't match actual address. "
                 f"Recorded: {remote}, Actual: {addr}."
             )
-            remote = Peer(addr.address, addr.udp_port, msg.from_peer.tcp_port)
+            return
         self.pong(hash, addr)
         if not self.check_endpoint_proof(id):
             self.ping(addr)
@@ -338,7 +361,7 @@ class ControllerV4(Controller):
                 listener.on_node(node, msg.enr_seq)
             except Exception:
                 logger.error(
-                    f"Error on calling on_peer to listener.\n"
+                    f"Error on calling on_node to listener.\n"
                     f"Detail: {traceback.format_exc()}"
                 )
 
@@ -346,22 +369,37 @@ class ControllerV4(Controller):
         h = hash((msg.ping_hash, addr))
         if h not in self.pings:
             logger.warning(
-                f"Recieved a pong packet from {addr}, but no corresponding "
+                f"received a pong packet from {addr}, but no corresponding "
                 "ping packet."
             )
             return
-        assert h in self.ping_events, "Not impossible!"
         remote = self.pings.pop(h)
+        assert remote in self.pinging
+        self.pinging.pop(remote)
+        assert h in self.ping_events
+        flag = True
         if self.ping_events[h].is_set():
             logger.warning(f"The pong of {addr} is timeout, drop it.")
-            return
-        self.ping_events[h].set(True)
-        if remote != addr:
-            logger.warning(
-                "The address recorded doesn't match actual address. "
-                f"Recorded: {remote}, Actual: {addr}."
-            )
-        self.update_endpoint_proof(id)
+            flag = False
+        else:
+            if remote != addr:
+                logger.warning(
+                    "The address recorded doesn't match actual address. "
+                    f"Recorded: {remote}, Actual: {addr}."
+                )
+                flag = False
+            self.ping_events[h].set(remote == addr)
+            self.ping_events.pop(h)
+        if flag:
+            self.update_endpoint_proof(id)
+            for listener in self.listeners:
+                try:
+                    listener.on_reply(id, addr)
+                except Exception:
+                    logger.error(
+                        f"Error on calling on_reply to listener.\n"
+                        f"Detail: {traceback.format_exc()}"
+                    )
 
     def on_find(self, msg: FindNodeMessage, id: PublicKey, addr: Addr) -> None:
         if not self.check_endpoint_proof(id):
@@ -376,7 +414,7 @@ class ControllerV4(Controller):
                 result += listener.get_nodes(msg.target)
             except Exception:
                 logger.error(
-                    f"Error on calling on_find_neighbours to listener.\n"
+                    f"Error on calling get_nodes to listener.\n"
                     f"Detail: {traceback.format_exc()}"
                 )
         self.neighbours(result[:16], addr)
@@ -387,7 +425,7 @@ class ControllerV4(Controller):
                 listener.on_nodes(msg.nodes)
             except Exception:
                 logger.error(
-                    f"Error on calling on_neighbours to listener.\n"
+                    f"Error on calling on_nodes to listener.\n"
                     f"Detail: {traceback.format_exc()}"
                 )
 
@@ -404,7 +442,7 @@ class ControllerV4(Controller):
         h = hash((msg.request_hash, addr))
         if h not in self.enr_requests:
             logger.warning(
-                f"Recieved a enrresponse packet from {addr}, "
+                f"received a enrresponse packet from {addr}, "
                 "but no corresponding enrrequest packet."
             )
             return

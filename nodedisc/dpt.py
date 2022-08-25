@@ -40,8 +40,7 @@ class DPT:
         logger.info(f"DPT running with node key: 0x{self.id.to_bytes().hex()}")
         self.kbucket = KademliaRoutingTable(
             keccak(self.id.to_bytes()),
-            params.bucket_nodes,
-            params.num_buckets
+            *params
         )
         self.nodes: dict[bytes, Node] = {}
 
@@ -80,9 +79,9 @@ class DPT:
             assert(
                 id_hash in self.kbucket
             ), f"Incnsistency: {id_bytes.hex()[:7]}"
-            logger.info(f"Node {node} is in DHT.")
+            logger.warning(f"Node {node} is in DHT.")
             return
-        logger.info(f"Node {node} was added to DHT.")
+        logger.debug(f"Node {node} was added to DHT.")
         old_id_hash = self.kbucket.update(id_hash)
         self.nodes[id_hash] = node
         if old_id_hash is not None:
