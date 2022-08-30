@@ -31,7 +31,7 @@ See: https://github.com/ethereum/devp2p/blob/master/discv5/discv5.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.2"
+__version__ = "3.0"
 
 import logging
 from logging import FileHandler, Formatter, StreamHandler

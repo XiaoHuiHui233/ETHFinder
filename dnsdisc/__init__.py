@@ -14,7 +14,7 @@ __version__ = "1.8"
 import logging
 from logging import FileHandler, Formatter, StreamHandler
 
-from dnsdisc import resolver
+from . import resolver
 
 DEBUG = False
 
