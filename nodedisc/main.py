@@ -9,6 +9,7 @@ import asyncio
 import ipaddress
 import logging
 import os
+import traceback
 import typing
 from ipaddress import IPv4Address
 from typing import Optional
@@ -97,16 +98,22 @@ class NodeDisc(ListenerV4):
                 for id in self.enrs:
                     wf.write(self.enrs[id].to_text() + "\n")
 
-    async def read(self) -> None:
+    def read(self) -> None:
         if self.cache_path is not None and os.path.exists(self.cache_path):
             logger.info(f"Read cache nodes from {self.cache_path}")
             with open(self.cache_path, "r", encoding="utf8") as rf:
                 for line in rf:
-                    enr = ENR.from_text(line[:-1])
+                    try:
+                        enr = ENR.from_text(line.strip())
+                    except Exception:
+                        logger.warning(
+                            "Failed to read a cached enr, ignored it.\n"
+                            f"Detail: {traceback.format_exc()}"
+                        )
+                        continue
                     ip = typing.cast(IPv4Address, enr.content["ip"])
                     port = typing.cast(int, enr.content["udp"])
                     self.controller_v4.ping(Addr(ip, port))
-                    await asyncio.sleep(0.2)
                     if len(self.enrs) >= self.max_enrs:
                         break
 
@@ -117,7 +124,7 @@ class NodeDisc(ListenerV4):
         self.need_check_enrs[addr] = enr
         self.controller_v4.ping(addr)
 
-    async def query_dns_nodes(self, length: int = 20) -> None:
+    def query_dns_nodes(self, length: int = 20) -> None:
         for network in self.dns_networks:
             enrs = resolver.get_enrs(network, length)
             logger.info(f"Added {len(enrs)} from {network} DNS tree.")
@@ -129,7 +136,6 @@ class NodeDisc(ListenerV4):
                 if "udp" not in enr.content:
                     continue
                 self.check_enr_online(enr)
-                await asyncio.sleep(0.2)
                 if len(self.enrs) >= self.max_enrs:
                     break
 
@@ -147,30 +153,35 @@ class NodeDisc(ListenerV4):
                 break
         logger.info(f"Added {len(self.bootnodes)} boot nodes.")
 
-    def find_friends(self) -> None:
+    async def find_friends(self) -> None:
         logger.info("Peers is not enough, try to find more nodes.")
+        if len(self.enrs) >= self.max_enrs:
+            return
         random_nodes = self.dpt.shuffle_all(10)
         for node in random_nodes:
             self.controller_v4.find_node(
                 self.dpt.id, node.id, Addr(node.address, node.udp_port)
             )
 
+    async def boot(self) -> None:
+        self.query_dns_nodes()
+        self.read()
+        await self.bootstrap()
+        self.run_task = asyncio.create_task(self.run(), name="peer_loop")
+
     async def bind(self, host: str, port: int) -> None:
         logger.info("Service is binding.")
-        transport, _server = await server.startup(host, port)
-        self.transport = transport
-        self.running = True
-        _server.register_controller(self.controller_v4)
+        self.server = await server.startup(host, port)
+        self.server.register_controller(self.controller_v4)
         self.controller_v4.register_listener(self)
         if self.ipc_path is not None:
             self.ipc = IPCServer(self.ipc_path)
-            self.ipc_task = asyncio.create_task(self.ipc.bind())
-        await self.bootstrap()
-        await self.query_dns_nodes()
-        await self.read()
+            await self.ipc.bind()
+        asyncio.create_task(self.boot(), name="boot")
 
     async def run(self) -> None:
         logger.info("Service is running.")
+        self.running = True
         while self.running:
             logger.info(
                 f"Now peers: {len(self.dpt)}, Now Nodes: {len(self.enrs)} "
@@ -183,17 +194,11 @@ class NodeDisc(ListenerV4):
                 if len(self.enrs) >= self.max_enrs * 9 // 10:
                     self.need_more_friends = False
             if self.need_more_friends:
-                if len(self.enrs) <= 0:
-                    await self.query_dns_nodes(100)
-                self.find_friends()
-                await asyncio.sleep(10)
+                asyncio.create_task(self.find_friends(), name="find_friends")
+                await asyncio.sleep(30)
             else:
                 await asyncio.sleep(60)
             self.write()
-        logger.info("Service is stopped.")
-        if self.ipc_path is not None:
-            await self.ipc_task
-        logger.info("All is stopped.")
 
     def process_old(self, old: Optional[Node]) -> None:
         if old is not None:
@@ -202,22 +207,22 @@ class NodeDisc(ListenerV4):
 
     def on_node(self, node: Node, enr_seq: Optional[int]) -> None:
         if node.id == self.pubkey:
-            logger.warning("received a node of me!")
+            logger.warning("Received a node of me!")
             return
         addr = Addr(node.address, node.udp_port)
         if node.id not in self.dpt:
-            logger.info(f"received a new node {node}, add it to DHT.")
+            logger.info(f"Received a new node {node}, add it to DHT.")
             old = self.dpt.add(node)
             self.process_old(old)
             self.controller_v4.enr_request(node.id, addr)
         elif enr_seq is not None:
             if node.id not in self.enrs or self.enrs[node.id].seq < enr_seq:
-                logger.info(f"received a known node {node}, update it.")
+                logger.info(f"Received a known node {node}, update it.")
                 self.controller_v4.enr_request(node.id, addr)
             else:
-                logger.info(f"received a known node {node}, ignore it.")
+                logger.info(f"Received a known node {node}, ignore it.")
         else:
-            logger.info(f"received a known node {node}, but no seq.")
+            logger.info(f"Received a known node {node}, but no seq.")
 
     def _enr_check(self, enr: ENR) -> bool:
         if enr.content["id"] != "v4":
@@ -277,7 +282,7 @@ class NodeDisc(ListenerV4):
         for node in nodes:
             if node.id != self.pubkey and node.id not in self.dpt:
                 self.controller_v4.ping(Addr(node.address, node.udp_port))
-        logger.info(f"received {len(nodes)} nodes, ping them.")
+        logger.info(f"Received {len(nodes)} nodes, ping them.")
 
     def on_enr(self, id: PublicKey, enr: ENR) -> None:
         if id == self.dpt.id:
@@ -287,7 +292,7 @@ class NodeDisc(ListenerV4):
         logger.info(f"On ENR {id_str}.")
         if id not in self.enrs or self.enrs[id].seq < enr.seq:
             if not self._enr_check(enr):
-                logger.warning(f"received a trash ENR {id_str}, ban it.")
+                logger.warning(f"Received a trash ENR {id_str}, ban it.")
                 self.ban(id)
                 return
             self.enrs[id] = enr
@@ -297,7 +302,9 @@ class NodeDisc(ListenerV4):
             )
             logger.info(f"ENR list added/updated {id_str}({addr}).")
             if self.ipc_path is not None:
-                asyncio.create_task(self.ipc.boardcast_new_enr(id, enr))
+                asyncio.create_task(
+                    self.ipc.boardcast_new_enr(id, enr), name="bc_new_enr"
+                )
         else:
             logger.info(f"A outdate useless ENR {id_str}.")
 
@@ -305,18 +312,14 @@ class NodeDisc(ListenerV4):
         self.ban(id)
 
     async def close(self) -> None:
-        logger.info("Closing.")
         if self.running:
-            self.transport.close()
+            self.running = False
+            logger.debug("Nodedisc is closing.")
             if self.ipc_path is not None:
-                await self.ipc.boardcast_close()
                 await self.ipc.close()
-            self.running = False
-
-    def force_close(self) -> None:
-        logger.info("Force closing.")
-        if self.running:
-            self.transport.close()
-            if self.ipc_path is not None:
-                self.ipc_task.cancel("Force closing.")
-            self.running = False
+            self.server.close()
+            self.run_task.cancel()
+            await asyncio.sleep(0)
+            logger.info("Nodedisc is closed.")
+            logger.debug(f"Remain tasks: {asyncio.all_tasks()}")
+            asyncio.get_event_loop().stop()

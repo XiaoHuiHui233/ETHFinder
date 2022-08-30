@@ -1,10 +1,18 @@
+#!/usr/bin/env python
+# -*- codeing:utf-8 -*-
+"""
+"""
+
+__author__ = "XiaoHuiHui"
+
 import asyncio
 import logging
-from multiprocessing import Process
+import signal
 import sys
+from multiprocessing import Process
 
 import uvloop
-from eth_keys.datatypes import PrivateKey, PublicKey
+from eth_keys.datatypes import PrivateKey
 
 sys.path.append("./")
 
@@ -12,7 +20,7 @@ if True:  # noqa: E401
     import forks
     from enr.datatypes import ENR
     from nodedisc import KBucketParams, NodeDisc
-    from rlpx.ipc import IPCClient
+    from rlpx.main import EthControllerParams, RLPx
 
 logging.basicConfig(
     format="%(asctime)s [%(name)s][%(levelname)s] %(message)s",
@@ -22,6 +30,7 @@ logging.basicConfig(
         # FileHandler("./server.log", "w")
     ]
 )
+uvloop.install()
 
 PRIVATE_KEY = PrivateKey(
     bytes.fromhex(
@@ -56,47 +65,79 @@ BOOTNODES = [
     "enode://715171f50508aba88aecd1250af392a45a330af91d7b90701c436b618c86aaa1589c9184561907bebbb56439b8f8787bc01f49a7c77276c58c1b09822d75e8e8@52.231.165.108:30303",  # bootnode-azure-koreasouth-001
     "enode://5d6d7cd20d6da4bb83a1d28cadb5d409b64edf314c0335df658c1a54e32c7c4a7ab7823d57c39b6a757556e68ff1df17c748b698544a55cb488b52479a92b60f@104.42.217.25:30303",  # bootnode-azure-westus-001
 ]
+GENESIS_HASH = bytes.fromhex(
+    "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+)
 
 
-async def test1() -> None:
-    nodedisc = NodeDisc(
-        200,
-        PRIVATE_KEY,
-        ME,
-        KBucketParams(200, 256),
-        DNS_NETWORKS,
-        BOOTNODES,
-        "/tmp/nodedisc",
-        "./datas/peers"
-    )
-    await nodedisc.bind("0.0.0.0", 30304)
-    await nodedisc.run()
+nodedisc = NodeDisc(
+    200,
+    PRIVATE_KEY,
+    ME,
+    KBucketParams(200, 256),
+    DNS_NETWORKS,
+    BOOTNODES,
+    "/tmp/nodedisc",
+    "./datas/peers"
+)
+rlpx = RLPx(
+    PRIVATE_KEY,
+    200,
+    "/tmp/nodedisc",
+    "ETHFinder/v3.0/linux-amd64/Python3.10.4 (made by XiaoHuiHui)",
+    EthControllerParams(
+        1,
+        GENESIS_HASH,
+        forks.fork_hash,
+        forks.fork_next,
+        "./datas/newest.json"
+    ),
+    None
+)
+stopped = False
 
 
-def new_enr(id: PublicKey, enr: ENR) -> None:
-    print(f"[Test] Received ID {id.to_bytes().hex()[:7]}.")
+def stop() -> None:
+    global stopped
+    if stopped:
+        return
+    print("Received SIGINT or SIGTERM, try to close service.")
+    asyncio.create_task(nodedisc.close())
+    stopped = True
 
 
-async def test2() -> None:
-    ipc_client = IPCClient("/tmp/nodedisc")
-    ipc_client.register_callback("new_enr", new_enr)
-    await ipc_client.bind()
+def do_nothing() -> None:
+    pass
 
 
-def main1():
-    uvloop.install()
-    asyncio.run(test1())
+def node_disc() -> None:
+    loop = asyncio.new_event_loop()
+    loop.add_signal_handler(signal.SIGINT, stop)
+    loop.add_signal_handler(signal.SIGTERM, stop)
+    loop.create_task(nodedisc.bind("0.0.0.0", 30304))
+    try:
+        loop.run_forever()
+    except Exception:
+        pass
+    finally:
+        loop.close()
 
 
-def main2():
-    uvloop.install()
-    asyncio.run(test2())
+def rlpx_eth() -> None:
+    loop = asyncio.new_event_loop()
+    loop.add_signal_handler(signal.SIGINT, do_nothing)
+    loop.add_signal_handler(signal.SIGTERM, do_nothing)
+    loop.create_task(rlpx.bind("0.0.0.0", 30304))
+    try:
+        loop.run_forever()
+    except Exception:
+        pass
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":
-    p1 = Process(target=main1)
-    p2 = Process(target=main2)
-    p1.start()
-    p2.start()
-    p1.join()
-    p2.join()
+    p = Process(target=rlpx_eth)
+    p.start()
+    node_disc()
+    p.join()

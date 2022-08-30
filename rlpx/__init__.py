@@ -13,28 +13,34 @@ See: https://github.com/ethereum/devp2p/blob/master/rlpx.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
+__version__ = "3.0"
 
-import os
+import logging
+from logging import FileHandler, Formatter, StreamHandler
 
-if not os.path.exists("./logs/rlpx/protocols"):
-    os.makedirs("./logs/rlpx/protocols")
+from .main import RLPx
 
-from .peer import Peer, PeerHandler
-from .server import TCPListener, TCPServer
-from .protocols.datatypes import Capability
-from .protocols.p2p import P2p, P2pListener, Protocol
-from .protocols.eth import Eth, EthHandler
+DEBUG = False
 
-__all__ = [
-    "Peer",
-    "PeerHandler",
-    "TCPListener",
-    "TCPServer",
-    "Eth",
-    "EthHandler",
-    "P2p",
-    "P2pListener",
-    "Protocol",
-    "Capability"
+sh = StreamHandler()
+fh = FileHandler("./logs/rlpx.log", "w", encoding="utf-8")
+fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+sh.setFormatter(fmt)
+fh.setFormatter(fmt)
+sh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+fh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+
+loggers = [
+    logging.getLogger("rlpx.ipc"),
+    logging.getLogger("rlpx.main"),
+    logging.getLogger("rlpx.peer.p2p"),
+    logging.getLogger("rlpx.peer.peer"),
+    logging.getLogger("rlpx.protocols.eth"),
+    logging.getLogger("rlpx.server"),
 ]
+
+for logger in loggers:
+    logger.addHandler(sh)
+    logger.addHandler(fh)
+
+__all__ = ["RLPx"]

@@ -43,6 +43,7 @@ import logging
 import traceback
 import typing
 from abc import ABCMeta
+from asyncio import CancelledError, Task
 from datetime import datetime
 from typing import Optional
 
@@ -192,9 +193,9 @@ class ControllerV4(Controller):
         self.me = me
         self.listeners: list[ListenerV4] = []
         self.enr_requests: dict[int, PublicKey] = LRU(10000)
-        self.pinging: dict[Addr, bool] = LRU(10000)
-        self.pings: dict[int, Addr] = LRU(10000)
-        self.ping_events: dict[int, Promise[bool]] = LRU(10000)
+        self.pinging: dict[Addr, bool] = {}
+        self.pings: dict[int, tuple[Addr, Task[None]]] = {}
+        self.ping_events: dict[int, Promise[bool]] = {}
         self.last_meets: dict[PublicKey, int] = LRU(10000)
         self.ban_list: dict[Addr, int] = LRU(10000)
 
@@ -240,7 +241,10 @@ class ControllerV4(Controller):
         self.last_meets[id] = now()
 
     async def ping_timeout(self, hash: int, addr: Addr) -> None:
-        await asyncio.sleep(TIMEOUT)
+        try:
+            await asyncio.sleep(TIMEOUT)
+        except CancelledError:
+            return
         if hash not in self.pings:
             return
         assert hash in self.ping_events
@@ -259,10 +263,12 @@ class ControllerV4(Controller):
         )
         msg_hash = self.send(msg, addr)
         h = hash((msg_hash, addr))
-        self.pings[h] = addr
+        task = asyncio.create_task(
+            self.ping_timeout(h, addr), name=f"ping_timeout_{addr}"
+        )
+        self.pings[h] = (addr, task)
         self.ping_events[h] = promise = Promise[bool]()
         self.pinging[addr] = True
-        asyncio.create_task(self.ping_timeout(h, addr))
         return promise
 
     def ping(self, addr: Addr) -> None:
@@ -282,7 +288,9 @@ class ControllerV4(Controller):
             return
         if addr in self.pinging:
             return
-        asyncio.create_task(self.waitable_ping(addr))
+        asyncio.create_task(
+            self.waitable_ping(addr), name=f"ping_{addr}"
+        )
 
     def pong(self, ping_hash: bytes, addr: Addr) -> None:
         if self.has_banned(addr):
@@ -309,7 +317,7 @@ class ControllerV4(Controller):
         if self.has_banned(addr):
             return
         asyncio.create_task(
-            self.waitable_find_node(target, id, addr)
+            self.waitable_find_node(target, id, addr), name=f"find_node_{addr}"
         )
 
     def neighbours(self, nodes: list[Node], addr: Addr) -> None:
@@ -334,7 +342,9 @@ class ControllerV4(Controller):
     def enr_request(self, id: PublicKey, addr: Addr) -> None:
         if self.has_banned(addr):
             return
-        asyncio.create_task(self.waitable_enr_request(id, addr))
+        asyncio.create_task(
+            self.waitable_enr_request(id, addr), name=f"enr_request_{addr}"
+        )
 
     def enr_response(self, req_hash: bytes, addr: Addr) -> None:
         if self.has_banned(addr):
@@ -369,13 +379,14 @@ class ControllerV4(Controller):
         h = hash((msg.ping_hash, addr))
         if h not in self.pings:
             logger.warning(
-                f"received a pong packet from {addr}, but no corresponding "
+                f"Received a pong packet from {addr}, but no corresponding "
                 "ping packet."
             )
             return
-        remote = self.pings.pop(h)
-        assert remote in self.pinging
-        self.pinging.pop(remote)
+        remote, task = self.pings.pop(h)
+        task.cancel()
+        if remote in self.pinging:
+            self.pinging.pop(remote)
         assert h in self.ping_events
         flag = True
         if self.ping_events[h].is_set():
@@ -442,7 +453,7 @@ class ControllerV4(Controller):
         h = hash((msg.request_hash, addr))
         if h not in self.enr_requests:
             logger.warning(
-                f"received a enrresponse packet from {addr}, "
+                f"Received a enrresponse packet from {addr}, "
                 "but no corresponding enrrequest packet."
             )
             return

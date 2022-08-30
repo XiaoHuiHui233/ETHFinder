@@ -1,8 +1,9 @@
 cryptography>=37.0.4
 eth-hash[pycryptodome]>=0.3.3
 eth-keys>=0.4.0
-lru-dict>=1.1.7
 eth_utils>=2.0.0
+lru-dict>=1.1.7
+python-snappy>=0.6.1
 rlp>=3.0.0
 ujson>=5.4.0
 uvloop>=0.16.0

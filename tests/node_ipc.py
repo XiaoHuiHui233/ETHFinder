@@ -7,11 +7,11 @@ __author__ = "XiaoHuiHui"
 
 import asyncio
 import logging
-import signal
+from multiprocessing import Process
 import sys
 
 import uvloop
-from eth_keys.datatypes import PrivateKey
+from eth_keys.datatypes import PrivateKey, PublicKey
 
 sys.path.append("./")
 
@@ -19,6 +19,7 @@ if True:  # noqa: E401
     import forks
     from enr.datatypes import ENR
     from nodedisc import KBucketParams, NodeDisc
+    from rlpx.ipc import IPCClient
 
 logging.basicConfig(
     format="%(asctime)s [%(name)s][%(levelname)s] %(message)s",
@@ -63,43 +64,46 @@ BOOTNODES = [
     "enode://5d6d7cd20d6da4bb83a1d28cadb5d409b64edf314c0335df658c1a54e32c7c4a7ab7823d57c39b6a757556e68ff1df17c748b698544a55cb488b52479a92b60f@104.42.217.25:30303",  # bootnode-azure-westus-001
 ]
 
-uvloop.install()
 
-loop = asyncio.new_event_loop()
-
-nodedisc = NodeDisc(
-    200,
-    PRIVATE_KEY,
-    ME,
-    KBucketParams(200, 256),
-    DNS_NETWORKS,
-    BOOTNODES,
-    "/tmp/nodedisc",
-    "./datas/peers"
-)
-
-
-def stop() -> None:
-    print("Received KEYBOARD INTERRUPT, try to close service.")
-    loop.create_task(nodedisc.close())
+async def test1() -> None:
+    nodedisc = NodeDisc(
+        200,
+        PRIVATE_KEY,
+        ME,
+        KBucketParams(200, 256),
+        DNS_NETWORKS,
+        BOOTNODES,
+        "/tmp/nodedisc",
+        "./datas/peers"
+    )
+    await nodedisc.bind("0.0.0.0", 30304)
+    await nodedisc.run()
 
 
-def force_stop() -> None:
-    print("Received SIGTERM, force close service.")
-    loop.stop()
+def new_enr(id: PublicKey, enr: ENR) -> None:
+    print(f"[Test] Received ID {id.to_bytes().hex()[:7]}.")
 
 
-def test() -> None:
-    loop.create_task(nodedisc.bind("0.0.0.0", 30304))
-    loop.add_signal_handler(signal.SIGINT, stop)
-    loop.add_signal_handler(signal.SIGTERM, force_stop)
-    try:
-        loop.run_forever()
-    except Exception:
-        pass
-    finally:
-        loop.close()
+async def test2() -> None:
+    ipc_client = IPCClient("/tmp/nodedisc")
+    ipc_client.register_callback("new_enr", new_enr)
+    await ipc_client.bind()
+
+
+def main1():
+    uvloop.install()
+    asyncio.run(test1())
+
+
+def main2():
+    uvloop.install()
+    asyncio.run(test2())
 
 
 if __name__ == "__main__":
-    test()
+    p1 = Process(target=main1)
+    p2 = Process(target=main2)
+    p1.start()
+    p2.start()
+    p1.join()
+    p2.join()

@@ -29,22 +29,25 @@ class IPCConnection:
         self.server = server
         self.reader = reader
         self.writer = writer
+        self.running = False
         logger.info(f"IPC Connection #{id} is connected.")
 
-    async def bind(self) -> None:
-        while not self.reader.at_eof():
-            data = await self.reader.readline()
-            logger.debug(f"received {data.decode()}")
-            try:
+    async def run(self) -> None:
+        self.running = True
+        try:
+            while not self.reader.at_eof():
+                data = await self.reader.readline()
+                logger.debug(
+                    f"IPC Connection #{self.id} received {data.decode()}"
+                )
                 d = ujson.loads(data.decode())
                 self.receive(d)
-            except Exception:
-                logger.warning(
-                    f"IPC connection #{self.id} received illegal datas."
-                )
-                logger.debug(traceback.format_exc())
-                await self.close()
-                break
+        except Exception:
+            logger.warning(
+                f"IPC Connection #{self.id} received illegal datas."
+            )
+            logger.debug(traceback.format_exc())
+            await self.close()
 
     def receive(self, data: dict[str, str]) -> None:
         if data["type"] == "ban":
@@ -55,14 +58,18 @@ class IPCConnection:
         self.writer.write(data)
         self.writer.write(b"\n")
         logger.debug(
-            f"Send data {data.decode()} to IPC connection #{self.id}."
+            f"Send data {data.decode()} to IPC Connection #{self.id}."
         )
         await self.writer.drain()
 
     async def close(self) -> None:
+        if not self.running:
+            return
+        logger.debug(f"IPC Connection #{self.id} is closing.")
+        self.running = False
         self.writer.close()
-        logger.info(f"IPC connection #{self.id} is closing.")
         await self.writer.wait_closed()
+        logger.info(f"IPC Connection #{self.id} is closed.")
 
 
 class IPCServer:
@@ -82,27 +89,41 @@ class IPCServer:
         self.server = await asyncio.start_unix_server(
             self.on_connect, self.path
         )
+        self.task = asyncio.create_task(self.run(), name="ipc_run")
+
+    async def run(self) -> None:
         await self.server.serve_forever()
 
     async def close(self) -> None:
-        for conn in self.connections:
-            await conn.close()
+        logger.debug("IPC Server is closing.")
+        await self.boardcast_close()
+        await asyncio.gather(
+            *[conn.close() for conn in self.connections],
+            return_exceptions=True
+        )
         self.server.close()
         await self.server.wait_closed()
+        self.task.cancel()
+        await asyncio.sleep(0)
+        logger.info("IPC Server is closed.")
 
     async def send_all(self, data: bytes) -> None:
-        for conn in self.connections:
-            try:
-                await conn.send(data)
-            except Exception:
+        results = await asyncio.gather(
+            *[conn.send(data) for conn in self.connections],
+            return_exceptions=True
+        )
+        cnt = 0
+        for r in results:
+            if r is not None:
                 logger.warning(
-                    f"IPC server failed to boardcast msg to #{conn.id}"
+                    f"IPC server failed to boardcast msg to #{cnt}"
                 )
+            cnt += 1
 
     async def boardcast_new_enr(self, id: PublicKey, enr: ENR) -> None:
         data = ujson.dumps({
             "type": "new_enr",
-            "id": id.to_compressed_bytes().hex(),
+            "id": id.to_bytes().hex(),
             "enr": enr.to_text()
         }).encode()
         await self.send_all(data)
@@ -119,5 +140,5 @@ class IPCServer:
         conn = IPCConnection(self.id_cnt, self, reader, writer)
         self.id_cnt += 1
         self.connections.add(conn)
-        await conn.bind()
+        await conn.run()
         self.connections.remove(conn)

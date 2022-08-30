@@ -12,7 +12,7 @@ import ipaddress
 import logging
 import traceback
 from abc import ABCMeta
-from asyncio import BaseTransport, DatagramProtocol, DatagramTransport
+from asyncio import DatagramProtocol, DatagramTransport
 from typing import Any
 
 from .datatypes import Addr
@@ -40,11 +40,11 @@ class UDPServer(DatagramProtocol):
         self, data: bytes, addr: tuple[str | Any, int]
     ) -> None:
         if len(data) > MAX_ALLOWED_DATA_LENGTH:
-            logger.warning(f"received data from {addr}, but too large!")
+            logger.warning(f"Received data from {addr}, but too large!")
             return
         try:
             new_addr = Addr(ipaddress.ip_address(addr[0]), addr[1])
-            logger.debug(f"received data from {new_addr}.")
+            logger.debug(f"Received data from {new_addr}.")
             for controller in self.controllers:
                 controller.on_message(data, new_addr)
         except Exception:
@@ -59,6 +59,11 @@ class UDPServer(DatagramProtocol):
         )
 
     def send(self, data: bytes, addr: Addr) -> None:
+        if addr.address.version == 6:
+            logger.warning(
+                f"Failed to senddata to {addr}. IPv6 is not supported."
+            )
+            return
         logger.debug(f"Send data to {addr}.")
         try:
             self.transport.sendto(data, (str(addr.address), addr.udp_port))
@@ -67,6 +72,11 @@ class UDPServer(DatagramProtocol):
                 f"Error on sending data to {addr}.\n"
                 f"Detail: {traceback.format_exc()}"
             )
+
+    def close(self) -> None:
+        logger.debug("UDP Server is closing.")
+        self.transport.close()
+        logger.info("UDP Server is closed.")
 
 
 class Controller(metaclass=ABCMeta):
@@ -78,11 +88,11 @@ class Controller(metaclass=ABCMeta):
         raise NotImplementedError()
 
 
-async def startup(address: str, port: int) -> tuple[BaseTransport, UDPServer]:
-    loop = asyncio.get_running_loop()
-    transport, protocol = await loop.create_datagram_endpoint(
+async def startup(address: str, port: int) -> UDPServer:
+    loop = asyncio.get_event_loop()
+    _, protocol = await loop.create_datagram_endpoint(
         lambda: UDPServer(),
         local_addr=(address, port)
     )
     logger.info(f"UDP server has been started up on {address}:{port}.")
-    return transport, protocol
+    return protocol

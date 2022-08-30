@@ -4,7 +4,6 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
 
 from cryptography.hazmat import backends
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -43,7 +42,7 @@ class MAC:
         self.update(header_mac_seed)
         return self.digest()[:16]
 
-    def update_body(self, frame_ciphertext: bytes) -> None:
+    def update_body(self, frame_ciphertext: bytes) -> bytes:
         self.update(frame_ciphertext)
         aes = Cipher(CIPHER(self.secret), MODE(),
                      backends.default_backend()).encryptor()

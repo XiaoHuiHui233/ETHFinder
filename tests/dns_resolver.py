@@ -1,10 +1,17 @@
+#!/usr/bin/env python
+# -*- codeing:utf-8 -*-
+"""
+"""
+
+__author__ = "XiaoHuiHui"
+
 import logging
 import sys
 
 sys.path.append("./")
 
 if True:  # noqa: E401
-    from ..dnsdisc import resolver
+    from dnsdisc import resolver
 
 logging.basicConfig(
     format="%(asctime)s [%(name)s][%(levelname)s] %(message)s",
