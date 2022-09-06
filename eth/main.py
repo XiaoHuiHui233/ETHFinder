@@ -4,27 +4,21 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.3"
 
-from typing import Any
+import asyncio
 import logging
-from logging import FileHandler, Formatter, StreamHandler
 import random
 import time
-from multiprocessing.connection import Connection
+import typing
+from asyncio import CancelledError
+from logging import FileHandler, Formatter, StreamHandler
 
-import trio
 import rlp
 from eth_hash.auto import keccak
+from eth.cache import EthCache
+from rlpx.protocols.eth import CODES
 
-from rlpx.protocols.eth import Eth
-from rlpx.protocols.eth import MESSAGE_CODES
-from store import block, peer
-import config as opts
-from .cache import EthCache
-from .handler import MyEthHandler
-
-from utils import RLP
+from .ipc import IPCClient
 
 logger = logging.getLogger("eth.controller")
 fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
@@ -37,107 +31,120 @@ sh.setLevel(logging.INFO)
 logger.addHandler(fh)
 logger.addHandler(sh)
 
+Rlpdecoded = list[bytes | list[bytes] | list[bytes | list[bytes]]]
 
-class EthController:
+PRINT_INTERVAL = 10
+
+
+class EthMain:
     """
     """
-    def __init__(self) -> None:
-        self.cache = EthCache()
-        self.handlers: dict[str, MyEthHandler] = {}
-        self.last_receipt_block = 0
-        self.last_receipt_block_hash = b"\0"
-        self.services_connections: dict[str, Connection] = {}
-        self.operators: dict[str, dict[str, callable]] = {
-            "get": {
-                # low-level
-                "block_headers": self.get_block_headers,
-                "block_bodies": self.get_block_bodies,
-                "pooled_transactions": self.get_pooled_transactions,
-                "node_data": self.get_node_data,
-                "receipts": self.get_receipts,  # high-level
-                "block": self.get_block,
-                "blocks": self.get_blocks,
-                "block_and_receipts": self.get_block_and_receipts,
-                "blocks_and_receipts": self.get_blocks_and_receipts,
-            }
-        }
-
-    def on_eth(self, eth: Eth) -> None:
-        eth.bind(
-            opts.ETH_STATUS_TIMEOUT,
-            opts.NETWORK_ID,
-            opts.GENESIS_HASH,
-            opts.HARD_FORK_HASH,
-            opts.NEXT_FORK
-        )
-        handler = MyEthHandler(self)
-        eth.register_handler(handler)
-        self.handlers[handler.rckey] = handler
+    def __init__(self, ipc_client_path: str, cache_limit: int) -> None:
+        self.ipc_client = IPCClient(ipc_client_path)
+        self.running = False
+        self.peers: dict[str, int] = {}
+        self.cache = EthCache(cache_limit)
+        self.mempool = Mempool()
+        self.blooms: dict[str, bytes] = {}
 
     async def bind(self) -> None:
-        async with trio.open_nursery() as eth_loop:
-            self.eth_loop = eth_loop
-            eth_loop.start_soon(self.print_loop)
-            for name in self.services_connections:
-                eth_loop.start_soon(self.recieve_loop, name)
+        await self.ipc_client.bind()
+        self.run_task = asyncio.create_task(self.run(), name="run")
 
-    async def print_loop(self) -> None:
-        while True:
-            logger.info(
-                f"Now {len(self.handlers)} handlers alive. "
-                f"Message queue: {self.channel.qsize()}"
-            )
-            sample = random.sample(
-                list(self.handlers.keys()), min(len(self.handlers), 50)
-            )
-            cache = []
-            for rckey in sample:
-                if self.handlers[rckey].running:
-                    cache.append(rckey)
-            peer.write_peers(cache)
-            await trio.sleep(opts.PRINT_INTERVAL)
-
-    async def register_services(
-        self, name: str, services_connection: Connection
-    ) -> None:
-        self.services_connections[name] = services_connection
-
-    async def receive_loop(self, name: str) -> None:
+    async def run(self) -> None:
+        self.running = True
         while True:
             try:
-                if self.services_connections[name].poll():
-                    request = self.services_connections[name].recv()
-                    result = await self.handle_request(request)
-                    self.services_connections[name].send(result)
+                await asyncio.sleep(PRINT_INTERVAL)
+            except CancelledError:
+                return
+            logger.info(f"Now {len(self.peers)} handlers alive.")
+
+    async def close(self) -> None:
+        if self.running:
+            self.run_task.cancel()
+            await asyncio.sleep(0)
+        else:
+            logger.warning("Main is not running! Ignore to close.")
+
+    async def on_ready(self, addr: str, version: int) -> None:
+        if addr in self.peers:
+            logger.warning(f"{addr} is in peers!")
+            return
+        self.peers[addr] = version
+
+    async def on_pop(self, addr: str) -> None:
+        self.peers.pop(addr)
+
+    async def on_message(
+        self, addr: str, code: int, data: Rlpdecoded
+    ) -> None:
+        code_e = CODES(code)
+        match(code_e):
+            case CODES.STATUS:
+                return
+            case CODES.NEW_BLOCK_HASHES:
+                await self.new_block_hashes(data)
+            case CODES.TX:
+                await self.new_tx(data)
+            case CODES.NEW_BLOCK:
+                await self.new_block(addr, data)
+            case CODES.NEW_POOLED_TRANSACTION_HASHES:
+                await self.new_pooled_tx_hash(addr, data)
+            case CODES.GET_BLOCK_HEADERS:
+                logger.info(f"receive GET_BLOCK_HEADERS from {self.rckey}.")
+                if self.peers[addr] >= 66:
+                    request_id = data[0]
+                    headers = await self.raw_get_headers(
+                        addr, data[1]
+                    )
+                    await self.send_message(
+                        CODES.BLOCK_HEADERS, [request_id, headers]
+                    )
                 else:
-                    trio.sleep(0)
-            except EOFError:
-                logger.info(f"EOF on service {name}, stopped.")
-                break
-            except Exception:
-                trio.sleep(0)
+                    headers = await self.raw_get_headers(
+                        addr, data
+                    )
+                await self.send_message(CODES.BLOCK_HEADERS, headers)
+            case CODES.GET_BLOCK_BODIES:
+                logger.info(f"receive GET_BLOCK_BODIES from {self.rckey}.")
+                if self.peers[addr] >= 66:
+                    request_id = data[0]
+                    bodies = await self.raw_get_bodies(
+                        addr, data[1]
+                    )
+                    await self.send_message(
+                        CODES.BLOCK_BODIES, [request_id, bodies]
+                    )
+                else:
+                    bodies = await self.raw_get_bodies(self.rckey, data)
+                    await self.send_message(CODES.BLOCK_BODIES, bodies)
+            case CODES.GET_RECEIPTS | \
+                    CODES.GET_NODE_DATA | \
+                    CODES.GET_POOLED_TRANSACTIONS:
+                logger.info(f"receive {code} from {self.rckey}.")
+                if self.peers[addr] >= 66:
+                    request_id = data[0]
+                    await self.send_message(CODE_PAIR[code], [request_id, []])
+                else:
+                    await self.send_message(CODE_PAIR[code], [])
+            case CODES.BLOCK_HEADERS | \
+                    CODES.BLOCK_BODIES | \
+                    CODES.NODE_DATA | \
+                    CODES.POOLED_TRANSACTIONS | \
+                    CODES.RECEIPTS:
+                self.handle_default(code, data)
 
-    async def handle_request(self, request: dict[str, Any]) -> Any:
-        rckey = self.choose_one()
-        if request["type"] not in self.operators.keys():
-            raise ValueError("Invalid type to get from controller!")
-        elif request["obj"] not in self.operators[request["type"]].keys():
-            raise ValueError(
-                f'Invalid obj in type {request["type"]} to get from '
-                "controller!"
-            )
-        self.operators[request["type"]][request["obj"]
-                                        ](rckey, **request["data"])
+    async def new_block_hashes(self, data: Rlpdecoded) -> None:
+        for ld in data:
+            hash = typing.cast(bytes, ld[0])
+            number = int.from_bytes(typing.cast(bytes, ld[1]), "big")
+            if number 
 
-    def choose_one(self, dont_want: str = None) -> str:
-        """Randomly choose a rckey of a handler from handler list.
-        """
-        rckeys = list(self.handlers.keys())
-        if dont_want is not None and dont_want in rckeys:
-            rckeys.remove(dont_want)
-        if not rckeys:
-            return None
-        return random.choice(rckeys)
+    async def new_tx(self, data: Rlpdecoded) -> None:
+
+        self.mempool.add()
+
 
     async def raw_get_headers(self,
                               payload: RLP,
@@ -284,22 +291,6 @@ class EthController:
             self.services_connections[name].send({
                 "type": "handle_new_pooled_transaction_hash", "data": payload
             })
-
-    async def handle_new_tx(self, rckey: str, payload: RLP) -> None:
-        # logger.info(f"received a new tx.")
-        for name in self.services_connections:
-            self.services_connections[name].send({
-                "type": "handle_transactions", "data": payload
-            })
-        keys = list(self.handlers.keys())
-        samples = random.sample(keys, min(5, len(self.handlers)))
-        for key in samples:
-            if key == rckey:
-                continue
-            if key in self.handlers:
-                await self.handlers[key].send_message(
-                    MESSAGE_CODES.TX, payload
-                )
 
     async def get_block_headers(
         self, rckey, startblock, limit, skip, reverse, id

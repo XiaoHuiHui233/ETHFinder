@@ -4,7 +4,6 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
 
 from typing import NamedTuple
 
@@ -13,9 +12,6 @@ from eth_hash.auto import keccak
 
 from . import transaction
 from .transaction import Transaction
-
-
-from utils import RLP
 
 
 class BlockHeader(NamedTuple):

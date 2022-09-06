@@ -10,8 +10,6 @@ from typing import NamedTuple, Union
 
 import rlp
 
-from utils import RLP
-
 
 class Log(NamedTuple):
     contract_address: bytes

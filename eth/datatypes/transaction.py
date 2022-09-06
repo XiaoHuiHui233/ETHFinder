@@ -4,13 +4,12 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
 
 from typing import NamedTuple, Union
 
 import rlp
 
-from utils import RLP
+Rlpdecoded = bytes | list[bytes | list[bytes] | list[bytes | list[bytes]]]
 
 
 class LegacyTransaction(NamedTuple):
@@ -100,7 +99,7 @@ def transaction_2718_from_RLP(payload: RLP) -> Transaction2718:
 Transaction = Union[LegacyTransaction, Transaction2718]
 
 
-def transaction_from_RLP(payload: RLP) -> Transaction:
+def transaction_from_RLP(payload: Rlpdecoded) -> Transaction:
     if isinstance(payload, list):
         return LegacyTransaction.from_RLP(payload)
     else:

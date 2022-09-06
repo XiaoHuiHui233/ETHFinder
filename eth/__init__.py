@@ -4,7 +4,6 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
 
 import os
 
