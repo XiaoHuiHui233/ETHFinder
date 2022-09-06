@@ -1,59 +1,75 @@
 # ETHFinder
 
-使用python 3.10开发的简易以太坊客户端，提供以太坊devp2p网络的基本实现，包括节点发现协议（v4/v5）、rlpx协议以及eth协议(63/64/65/66)。  
-本项目在网络实现的基础上同时实现了对链上数据的爬取、分析。  
+Simple Ethereum client developed with python 3.10. The project provides the basic implementation of Ethereum devp2p network, including node discovery protocol (v4/v5), rlpx protocol and eth protocol (62/63/64/65/66/67). Concurrency is achieved using asyncio and multiprocessing.  
 
-## 使用方法
+[中文](README_cn.md) | English  
 
-运行以下指令安装所需依赖（建议配合虚拟环境，如virtualenv/conda）：  
+## Install
+
+Run the following commands to install the required dependencies (recommended to work with a virtual environment, such as virtualenv/conda):  
 
 ```shell
 pip install -r requirements.txt
 ```
 
-运行以下指令开启服务：  
+## Usage
 
-```shell
-python3 main.py
+Use the dnsdisc service to parse the DNS information discovered by the ETH node.  
+Example: [tests/dns_resolver.py](tests/dns_resolver.py)  
+
+```python
+from dnsdisc import resolver
+
+# test for get 200 enrs
+enrs = resolver.get_enrs(
+    "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net",  # url to resolve
+    200  # number of iterations
+)
 ```
 
-## 协议列表
+Use nodedisc to participate in node discovery.  
+Example:  
+[tests/discv4.py](tests/discv4.py)  
 
-- [x] 节点发现协议v4
-- [x] EIP-778: 以太坊节点记录(ENR)
-- [x] ENR "eth" 条目
-- [x] EIP-868: 节点发现协议v4的ENR扩展
-- [x] EIP-1459: 通过DNS发现节点
-- [x] EIP-2124: 用于链兼容性检查的forkid
-- [ ] 节点发现协议v5
-- [x] rlpx协议
-- [x] 以太坊线协议62
-- [x] 以太坊线协议63
-- [x] EIP-2364: 以太坊线协议64: forkid扩展协议握手
-- [x] EIP-2464: 以太坊线协议65: 交易公告和检索
-- [x] EIP-2976: 基于Gossip的类型化交易
-- [x] EIP-2481: 以太坊线协议66: 请求标识符
-- [x] EIP-4938: 以太坊线协议67: 删除GetNodeData
+Use nodedisc to participate in node discovery, and test using IPC to get ENR.  
+Example:  
+[tests/node_ipc.py](tests/node_ipc.py)  
 
-## 基本架构
+Use rlpx and eth to run the RLPx protocol and the Ethereum wire protocol, note that rlpx requires nodedisc as a dependency.  
+Example:  
+[tests/rlpx_eth.py](tests/rlpx_eth.py)  
+
+## Protocols list
+
+- [x] Node Discovery Protocol v4
+- [x] EIP-778: Ethereum Node Record (ENR)
+- [x] ENR "eth" entry
+- [x] EIP-868: Node Discovery v4 ENR Extension
+- [x] EIP-1459: Discover nodes via DNS
+- [x] EIP-2124: Fork identifier for chain compatibility checks
+- [ ] Node Discovery Protocol v5
+- [x] RLPx Protocol
+- [x] Ethereum Wire Protocol 62
+- [x] Ethereum Wire Protocol 63
+- [x] EIP-2364: eth/64: forkid-extended protocol handshake
+- [x] EIP-2464: eth/65: transaction announcements and retrievals
+- [x] EIP-2976: Typed Transactions over Gossip
+- [x] EIP-2481: eth/66: request identifier
+- [x] EIP-4938: eth/67: Removal of GetNodeData
+
+## Basic Architecture
 
 ![image](framework.png)
 
-## 模块列表
+## Modules List
 
-`core` 核心控制代码，用于调度各个不同的模块。  
-`eth` 核心以太坊控制模块，用于维护宏观层面下的以太坊协议的行为和消息。  
-`eth.datatypes` 以太坊协议角度的数据结构代码，支持EIP-2718、EIP-2930、EIP-1559。  
-`services` 核心服务代码，用于对外提供链上信息获取服务、uniswap解析服务等。  
-`dnsdisc` DNS发现协议模块，根据EIP-1459规范实现对以太坊DNS服务的解析。  
-`nodedisc` 节点发现协议模块，包括协议通信和DPT。  
-`nodedisc.discv4` 节点发现协议v4代码，提供节点发现服务。  
-`rlpx` rlpx协议模块，提供基于RLPx的基础网络通信接口。  
-`rlpx.procotols` rlpx子协议代码，提供基于rlpx实现的高层协议实现，如以太坊线协议。  
-`store` 数据持久化模块，提供简单可用的数据持久化，用于保存某些基础状态，简单但不高效。  
-`tests` 测试模块，有一些单元测试用例。  
-`trickmath` 提供用于计算uniswap的`魔幻`数学模块。  
+`dnsdisc` The DNS discovery protocol module implements the resolution of the Ethereum DNS service according to the EIP-1459 specification.  
+`enr` ENR module, which provides the data structure of Ethereum node records.  
+`eth` The core Ethereum control module controls the behavior and messages of the Ethereum protocol, caches blocks, and records the mempool.  
+`nodedisc` The node discovery protocol module includes protocol communication and DPT, among which the node discovery protocol v4 is currently implemented.  
+`rlpx` rThe lpx protocol module provides a basic network communication interface based on RLPx, and currently implements the Ethernet line protocol.  
+`tests` Test module, with some unit test cases.  
 
-## 作者
+## Author
 
 [XiaoHuiHui](https://github.com/XiaoHuiHui233)

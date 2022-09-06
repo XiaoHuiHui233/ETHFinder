@@ -7,8 +7,9 @@ __author__ = "XiaoHuiHui"
 
 import asyncio
 import logging
-from multiprocessing import Process
+import secrets
 import sys
+from multiprocessing import Process
 
 import uvloop
 from eth_keys.datatypes import PrivateKey, PublicKey
@@ -30,16 +31,12 @@ logging.basicConfig(
     ]
 )
 
-PRIVATE_KEY = PrivateKey(
-    bytes.fromhex(
-        "9cc81c95762e34d3dbc2bade47ca93c176823193809ad1bb05b0b0976ae24187"
-    )
-)
+PRIVATE_KEY = PrivateKey(secrets.token_bytes(32))
 SEQ = 1
 ME = ENR.from_sign(
     PRIVATE_KEY,
     SEQ,
-    "104.250.52.28",
+    "0.0.0.0",
     30304,
     30304,
     forks.fork_hash,

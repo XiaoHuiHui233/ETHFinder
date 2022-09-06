@@ -22,7 +22,7 @@ logging.basicConfig(
     ]
 )
 
-# test for get 2000 enrs
+# test for get 200 enrs
 enrs = resolver.get_enrs(
     "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
     "all.mainnet.ethdisco.net",

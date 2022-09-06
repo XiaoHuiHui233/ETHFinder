@@ -9,7 +9,6 @@ services:
       - "/disk/ETHFinder/logs:/app/logs"
     ports:
       - "30304:30304"
-      - "8089:8089"
     deploy:
       resources:
         limits:
