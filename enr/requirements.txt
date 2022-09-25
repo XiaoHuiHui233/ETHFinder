@@ -1,0 +1,3 @@
+eth-hash[pycryptodome]>=0.3.3
+eth-keys>=0.4.0
+rlp>=3.0.0

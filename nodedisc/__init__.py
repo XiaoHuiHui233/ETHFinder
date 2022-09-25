@@ -31,24 +31,35 @@ See: https://github.com/ethereum/devp2p/blob/master/discv5/discv5.md
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "2.1"
+__version__ = "3.0"
 
-import os
+import logging
+from logging import FileHandler, Formatter, StreamHandler
 
-if not os.path.exists("./logs/nodedisc"):
-    os.makedirs("./logs/nodedisc")
+from .main import NodeDisc
+from .dpt import KBucketParams
 
-from .dpt import DPT, DPTListener
-from .server import UDPServer, Controller
-from .discv4.controller import ControllerV4, ListenerV4
-from .datatypes import PeerInfo
+DEBUG = False
 
-__all__ = [
-    "DPT",
-    "DPTListener",
-    "UDPServer",
-    "Controller",
-    "ControllerV4",
-    "ListenerV4",
-    "PeerInfo"
+sh = StreamHandler()
+fh = FileHandler("./logs/nodedisc.log", "w", encoding="utf-8")
+fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
+sh.setFormatter(fmt)
+fh.setFormatter(fmt)
+sh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+fh.setLevel(logging.DEBUG if DEBUG else logging.INFO)
+
+loggers = [
+    logging.getLogger("nodedisc.discv4"),
+    logging.getLogger("nodedisc.dpt"),
+    logging.getLogger("nodedisc.ipc"),
+    logging.getLogger("nodedisc.kbucket"),
+    logging.getLogger("nodedisc.main"),
+    logging.getLogger("nodedisc.server")
 ]
+
+for logger in loggers:
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+
+__all__ = ["KBucketParams", "NodeDisc"]

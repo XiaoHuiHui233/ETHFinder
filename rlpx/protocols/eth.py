@@ -4,39 +4,29 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
 
-from abc import ABCMeta, abstractmethod
-from enum import Enum
+import asyncio
 import logging
-from logging import FileHandler, Formatter
-import traceback
-from typing import Union
+import typing
+from asyncio import CancelledError
+from enum import Enum
+from typing import Any, NamedTuple, Optional
 
-import trio
-from trio import Event
+import ujson
 
-from .datatypes import Capability
-from .p2p import DISCONNECT_REASONS, P2p, Protocol
-import config as opts
-
-RLP = Union[list[list[bytes]], list[bytes], bytes]
+from ..datatypes import DC_REASONS, Addr, Capability
+from ..ipc import IPCServer
+from ..peer.p2p import P2pPeer, Protocol
 
 logger = logging.getLogger("rlpx.protocols.eth")
-fh = FileHandler("./logs/rlpx/protocols/eth.log", "w", encoding="utf-8")
-fmt = Formatter("%(asctime)s [%(name)s][%(levelname)s] %(message)s")
-fh.setFormatter(fmt)
-fh.setLevel(logging.WARN)
-logger.addHandler(fh)
 
-eth62 = Capability("eth", 62, 8)
-eth63 = Capability("eth", 63, 17)
-eth64 = Capability("eth", 64, 29)
-eth65 = Capability("eth", 65, 29)
-eth66 = Capability("eth", 66, 29)
+TIMEOUT = 5
+
+Rlpable = list[int | bytes | str | list[Any]]
+Rlpdecoded = list[bytes | list[bytes] | list[bytes | list[bytes]]]
 
 
-class MESSAGE_CODES(Enum):
+class CODES(Enum):
     # eth62
     STATUS = 0x00
     NEW_BLOCK_HASHES = 0x01
@@ -57,48 +47,45 @@ class MESSAGE_CODES(Enum):
     POOLED_TRANSACTIONS = 0x0a
 
 
-class Status:
-    """
-    """
-    def __init__(
-        self,
-        version: int,
-        network_id: int,
-        td: int,
-        best_hash: bytes,
-        genesis_hash: bytes,
-        fork_id: tuple[bytes, int] = None
-    ) -> None:
-        self.version = version
-        self.network_id = network_id
-        self.td = td
-        self.best_hash = best_hash
-        self.genesis_hash = genesis_hash
-        self.fork_id = fork_id
+class Status(NamedTuple):
+    version: int
+    network_id: int
+    td: int
+    best_hash: bytes
+    genesis_hash: bytes
+    fork_id: Optional[tuple[bytes, int]]
 
     @classmethod
-    def from_RLP(cls, payload: RLP, is_eth64: bool) -> "Status":
+    def from_RLP(cls, payload: Rlpdecoded, is_eth64: bool) -> "Status":
         if is_eth64:
             return cls(
-                int.from_bytes(payload[0], byteorder="big"),
-                int.from_bytes(payload[1], byteorder="big"),
-                int.from_bytes(payload[2], byteorder="big"),
-                payload[3],
-                payload[4], (
-                    payload[5][0],
-                    int.from_bytes(payload[5][1], byteorder="big")
+                int.from_bytes(typing.cast(bytes, payload[0]), "big"),
+                int.from_bytes(typing.cast(bytes, payload[1]), "big"),
+                int.from_bytes(typing.cast(bytes, payload[2]), "big"),
+                typing.cast(bytes, payload[3]),
+                typing.cast(bytes, payload[4]),
+                (
+                    typing.cast(bytes, payload[5][0]),
+                    int.from_bytes(typing.cast(bytes, payload[5][1]), "big")
                 )
             )
         else:
             return cls(
-                int.from_bytes(payload[0], byteorder="big"),
-                int.from_bytes(payload[1], byteorder="big"),
-                int.from_bytes(payload[2], byteorder="big"),
-                payload[3],
-                payload[4]
+                int.from_bytes(
+                    typing.cast(bytes, payload[0]), byteorder="big"
+                ),
+                int.from_bytes(
+                    typing.cast(bytes, payload[1]), byteorder="big"
+                ),
+                int.from_bytes(
+                    typing.cast(bytes, payload[2]), byteorder="big"
+                ),
+                typing.cast(bytes, payload[3]),
+                typing.cast(bytes, payload[4]),
+                None
             )
 
-    def to_RLP(self) -> RLP:
+    def to_RLP(self) -> Rlpable:
         if self.fork_id is None:
             return [
                 self.version,
@@ -128,217 +115,232 @@ class Status:
         return s
 
 
-class EthHandler(metaclass=ABCMeta):
-    """
-    """
-    def bind(self, eth: "Eth") -> None:
-        self.eth = eth
-        self.rckey = eth.rckey
-        self.version = eth.version
-        self.base_loop = eth.base.peer.peer_loop
+class EthController:
+    def __init__(
+        self,
+        network_id: int,
+        genesis_hash: bytes,
+        hard_fork_hash: bytes,
+        next_fork: int,
+        cache_file: str,
+        ipc_path: Optional[str] = None
+    ) -> None:
+        self.network_id = network_id
+        self.genesis_hash = genesis_hash
+        self.hard_fork_hash = hard_fork_hash
+        self.next_fork = next_fork
+        self.cache_file = cache_file
+        self.ipc_path = ipc_path
+        self.read_cache()
+        self.eths: dict[Addr, Eth] = {}
 
-    @abstractmethod
-    def after_status(self) -> None:
-        return NotImplemented
+    async def bind(self) -> None:
+        if self.ipc_path is not None:
+            self.ipc = IPCServer(self.ipc_path)
+            await self.ipc.bind()
 
-    @abstractmethod
-    async def handle_message(self, code: MESSAGE_CODES, data: RLP) -> None:
-        return NotImplemented
+    async def close(self) -> None:
+        if self.ipc_path is not None:
+            await self.ipc.close()
 
-    @abstractmethod
-    async def disconnect(self) -> None:
-        return NotImplemented
+    def read_cache(self) -> None:
+        try:
+            with open(self.cache_file, "r") as rf:
+                data = "\n".join(rf.readlines())
+                d = ujson.loads(data)
+                self.td = int(d["td"])
+                self.hash = bytes.fromhex(d["hash"])
+                self.height = d["height"]
+        except Exception:
+            logger.warning(
+                "[Controller] Failed to read cache, try default values."
+            )
+            self.td = 57839744486336011135818
+            self.hash = bytes.fromhex(
+                "ee8acc5348aa98500bbda72aa0f4209a"
+                "8b17ba9b637845ebdd3a034cda2dd4ef"
+            )
+            self.height = 15463202
+
+    def write_cache(self) -> None:
+        try:
+            with open(self.cache_file, "w") as wf:
+                data = {
+                    "td": str(self.td),
+                    "hash": self.hash.hex(),
+                    "height": self.height
+                }
+                wf.write(ujson.dumps(data, indent=4)+"\n")
+        except Exception:
+            logger.warning(
+                "[Controller] Failed to write cache. Ignore for next try."
+            )
+
+    def new_eth(
+        self, peer: P2pPeer, cap: Capability, offset: int
+    ) -> "Eth":
+        addr = peer.addr
+        assert addr not in self.eths
+        self.eths[addr] = Eth(peer, cap, offset, self)
+        return self.eths[addr]
+
+    def after_status(self, addr: Addr, version: int) -> None:
+        asyncio.create_task(
+            self.ipc.boardcast_ready(addr, version), name="bc_ready"
+        )
+
+    def pop(self, addr: Addr) -> None:
+        asyncio.create_task(
+            self.ipc.boardcast_pop(addr), name="bc_pop"
+        )
+        self.eths.pop(addr)
+
+    async def on_message(
+        self, addr: Addr, code: CODES, data: Rlpdecoded
+    ) -> None:
+        logger.info(f"[Controller] Received {code} from {addr}")
+        await self.ipc.boardcast_msg(addr, code.value, data)
 
 
 class Eth(Protocol):
     """
     """
-    def __init__(self, base: P2p, capability: Capability, offset: int) -> None:
-        super().__init__(base, capability, offset)
-        self.rckey = base.rckey
-        self.status_event = Event()
-        self.handlers: list[EthHandler] = []
-
-    def register_handler(self, handler: EthHandler) -> None:
-        handler.bind(self)
-        self.handlers.append(handler)
-
-    def bind(
+    def __init__(
         self,
-        status_timeout: int,
-        network_id: int,
-        genesis_hash: bytes,
-        hard_fork_hash: bytes,
-        next_fork: int
+        peer: P2pPeer,
+        cap: Capability,
+        offset: int,
+        controller: EthController,
     ) -> None:
-        if self.version >= 64:
+        super().__init__(peer, cap, offset)
+        self.controller = controller
+        if self.cap.version >= 64:
             self.status = Status(
-                self.version,
-                network_id,
-                opts.NOW_TD,
-                opts.NOW_HASH,
-                genesis_hash, (hard_fork_hash, next_fork)
+                self.cap.version,
+                controller.network_id,
+                controller.td,
+                controller.hash,
+                controller.genesis_hash,
+                (controller.hard_fork_hash, controller.next_fork)
             )
-            self.hard_fork_hash = hard_fork_hash
-            self.next_fork = next_fork
+            self.hard_fork_hash = controller.hard_fork_hash
+            self.next_fork = controller.next_fork
         else:
             self.status = Status(
-                self.version,
-                network_id,
-                opts.NOW_TD,
-                opts.NOW_HASH,
-                genesis_hash
+                self.cap.version,
+                controller.network_id,
+                controller.td,
+                controller.hash,
+                controller.genesis_hash,
+                None
             )
-        self.status_timeout = status_timeout
-
-    async def waiting_for_status(self) -> None:
-        with trio.move_on_after(self.status_timeout) as cancel_scope:
-            await self.status_event.wait()
-        if cancel_scope.cancelled_caught:
-            if self.status_event.is_set():
-                return
-            logger.warn(f"Recieved status message timeout from {self.rckey}")
-            await self.base.send_disconnect(DISCONNECT_REASONS.TIMEOUT)
+        self.hear_status = False
 
     async def after_hello(self) -> None:
         await self.send_status()
-        self.base.peer.peer_loop.start_soon(self.waiting_for_status)
+        self.status_timeout_task = asyncio.create_task(
+            self.waiting_for_status(), name=f"wait_status_{self.peer.addr}"
+        )
 
-    async def disconnect(self) -> None:
-        for handler in self.handlers:
-            try:
-                await handler.disconnect()
-            except Exception:
-                logger.error(
-                    f"Error on calling disconnect from {self.rckey} "
-                    f"to handler.\nDetail: {traceback.format_exc()}"
-                )
+    async def waiting_for_status(self) -> None:
+        try:
+            await asyncio.sleep(TIMEOUT)
+        except CancelledError:
+            return
+        if not self.hear_status:
+            logger.warning(
+                f"[{self.peer.addr}] Received status message timeout"
+            )
+            await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
 
-    async def handle_message(self, code: int, payload: RLP) -> None:
-        code = MESSAGE_CODES(code)
-        if code not in [
-            MESSAGE_CODES.TX, MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES
-        ]:
-            logger.info(f"Received {code} from {self.rckey}.")
-        if code == MESSAGE_CODES.STATUS:
-            await self.handle_status(payload)
+    async def after_status(self) -> None:
+        self.controller.after_status(self.peer.addr, self.cap.version)
+
+    async def received_message(self, code: int, data: Rlpdecoded) -> None:
+        logger.info(f"[{self.peer.addr}] Received {code}.")
+        code_e = CODES(code)
+        if code_e == CODES.STATUS:
+            await self.received_status(data)
             return
-        elif code in [
-            MESSAGE_CODES.TX,
-            MESSAGE_CODES.BLOCK_HEADERS,
-            MESSAGE_CODES.GET_BLOCK_HEADERS,
-            MESSAGE_CODES.NEW_BLOCK_HASHES,
-            MESSAGE_CODES.GET_BLOCK_BODIES,
-            MESSAGE_CODES.BLOCK_BODIES,
-            MESSAGE_CODES.NEW_BLOCK
-        ]:
-            if self.version < 62:
-                return
-        elif code in [
-            MESSAGE_CODES.GET_NODE_DATA,
-            MESSAGE_CODES.NODE_DATA,
-            MESSAGE_CODES.GET_RECEIPTS,
-            MESSAGE_CODES.RECEIPTS,
-        ]:
-            if self.version < 63:
-                return
-        elif code in [
-            MESSAGE_CODES.NEW_POOLED_TRANSACTION_HASHES,
-            MESSAGE_CODES.GET_POOLED_TRANSACTIONS,
-            MESSAGE_CODES.POOLED_TRANSACTIONS
-        ]:
-            if self.version < 65:
-                return
-        else:
+        if not self.hear_status:
+            logger.error(
+                f"[{self.peer.addr}] Except STATUS but else received."
+            )
+            await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
             return
-        for handler in self.handlers:
-            try:
-                await handler.handle_message(code, payload)
-            except Exception:
-                logger.error(
-                    f"Error on calling handle_message from {self.rckey} "
-                    f"to handler.\nDetail: {traceback.format_exc()}"
-                )
+        match code_e:
+            case CODES.TX | \
+                    CODES.BLOCK_HEADERS | \
+                    CODES.GET_BLOCK_HEADERS | \
+                    CODES.NEW_BLOCK_HASHES | \
+                    CODES.GET_BLOCK_BODIES | \
+                    CODES.BLOCK_BODIES | \
+                    CODES.NEW_BLOCK:
+                assert self.cap.version >= 62
+            case CODES.GET_NODE_DATA | CODES.NODE_DATA:
+                assert self.cap.version >= 63 and self.cap.version < 67
+            case CODES.GET_RECEIPTS | CODES.RECEIPTS:
+                assert self.cap.version >= 63
+            case CODES.NEW_POOLED_TRANSACTION_HASHES | \
+                    CODES.GET_POOLED_TRANSACTIONS | \
+                    CODES.POOLED_TRANSACTIONS:
+                assert self.cap.version >= 64
+        await self.controller.on_message(self.peer.addr, code_e, data)
 
     async def send_status(self) -> None:
-        await self.base.send_message(
-            MESSAGE_CODES.STATUS.value + self.offset, self.status.to_RLP()
+        await self.peer.send_message(
+            CODES.STATUS.value + self.offset, self.status.to_RLP()
         )
         logger.info(
-            f"Send STATUS message to {self.rckey} "
-            f"(eth{self.version})."
+            f"[{self.peer.addr}] Send STATUS message (eth{self.cap.version})."
         )
 
-    async def handle_status(self, payload: RLP) -> None:
+    async def received_status(self, data: Rlpdecoded) -> None:
+        self.hear_status = True
+        self.status_timeout_task.cancel()
         try:
-            self.peer_status = Status.from_RLP(payload, self.version >= 64)
+            self.peer_status = Status.from_RLP(data, self.cap.version >= 64)
         except Exception:
-            logger.warn(f"Status message format mismatch from {self.rckey}.")
-            await self.base.send_disconnect(
-                DISCONNECT_REASONS.SUBPROTOCOL_ERROR
+            logger.warning(
+                f"[{self.peer.addr}] Status message format mismatch."
             )
+            await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
             return
         logger.info(
-            f"Recieved STATUS message from {self.rckey} "
+            f"[{self.peer.addr}] Received STATUS message "
             f"(eth{self.peer_status.version})."
         )
-        await self.validate_status()
-
-    async def validate_status(self) -> None:
-        self.status_event.set()
         if self.status.version != self.peer_status.version:
-            logger.warn(
-                f"Protocol version mismatch from {self.rckey} "
+            logger.warning(
+                f"[{self.peer.addr}] Protocol version mismatch from "
                 f"(value: {self.peer_status.version})."
             )
-            await self.base.send_disconnect(
-                DISCONNECT_REASONS.SUBPROTOCOL_ERROR
-            )
+            await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
         elif self.status.network_id != self.peer_status.network_id:
-            logger.warn(
-                f"Network ID mismatch from {self.rckey} "
+            logger.warning(
+                f"[{self.peer.addr}] Network ID mismatch "
                 f"(value: {self.peer_status.network_id})."
             )
-            await self.base.send_disconnect(
-                DISCONNECT_REASONS.SUBPROTOCOL_ERROR
-            )
+            await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
         elif self.status.genesis_hash != self.peer_status.genesis_hash:
-            logger.warn(
-                f"Genesis block mismatch from {self.rckey} "
+            logger.warning(
+                f"[{self.peer.addr}] Genesis block mismatch "
                 f"(value: {self.peer_status.genesis_hash.hex()[:7]})."
             )
-            await self.base.send_disconnect(
-                DISCONNECT_REASONS.SUBPROTOCOL_ERROR
-            )
-        elif self.version >= 64 and \
-                not self.validate_fork_id(self.peer_status.fork_id):
-            logger.warn(
-                f"Hard fork mismatch from {self.rckey} "
-                f"(value: {self.peer_status.fork_id[0].hex()})."
-            )
-            await self.base.send_disconnect(
-                DISCONNECT_REASONS.SUBPROTOCOL_ERROR
-            )
-        # elif self.status.td > self.peer_status.td:
-        #     logger.warn(
-        #         f"Peer {self.rckey} total difficult is less than ours."
-        #         f"(value: {self.peer_status.td})."
-        #     )
-        #     await self.base.send_disconnect(
-        #         DISCONNECT_REASONS.SUBPROTOCOL_ERROR
-        #     )
+            await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
+        elif self.cap.version >= 64:
+            assert self.peer_status.fork_id is not None
+            if not self.validate_fork_id(self.peer_status.fork_id):
+                logger.warning(
+                    f"[{self.peer.addr}] Hard fork mismatch "
+                    f"(value: {self.peer_status.fork_id[0].hex()})."
+                )
+                await self.peer.disconnect(DC_REASONS.SUBPROTOCOL_ERROR)
         else:
-            logger.info(f"Successfully connected to {self.rckey}.")
-            for handler in self.handlers:
-                try:
-                    handler.after_status()
-                except Exception:
-                    logger.error(
-                        f"Error on calling after_status from {self.rckey}"
-                        f" to handler.\nDetail: {traceback.format_exc()}"
-                    )
+            logger.info(f"[{self.peer.addr}] Successfully connected eth.")
+            await self.after_status()
 
-    def validate_fork_id(self, fork_id: list[bytes]) -> None:
+    def validate_fork_id(self, fork_id: tuple[bytes, int]) -> bool:
         """
         Eth 64 Fork ID validation (EIP-2124)
         @param forkId Remote fork ID
@@ -346,25 +348,17 @@ class Eth(Protocol):
         peer_fork_hash = fork_id[0]
         peer_next_fork = fork_id[1]
         if peer_fork_hash == self.hard_fork_hash and \
-                self.next_fork >= peer_next_fork:
+                peer_next_fork < self.controller.height:
             logger.info(
-                f"{self.rckey} is advertising a future "
+                f"[{self.peer.addr}] is advertising a future "
                 "fork that passed locally."
             )
             return True
-        logger.warn(
-            f"{self.rckey} is not advertising a future "
+        logger.warning(
+            f"[{self.peer.addr}] is not advertising a future "
             "fork that passed locally."
         )
         return False
 
-    async def send_message(self, code: MESSAGE_CODES, payload: RLP) -> bool:
-        logger.info(f"Send {code} to {self.rckey}.")
-        return await self.base.send_message(self.offset + code.value, payload)
-
-
-# Protocol.register(eth62, Eth)
-Protocol.register(eth63, Eth)
-Protocol.register(eth64, Eth)
-Protocol.register(eth65, Eth)
-Protocol.register(eth66, Eth)
+    def exit(self) -> None:
+        self.controller.pop(self.peer.addr)

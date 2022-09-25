@@ -4,9 +4,8 @@
 """
 
 __author__ = "XiaoHuiHui"
-__version__ = "1.1"
 
-from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat import backends
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from eth_hash.auto import keccak
 
@@ -36,17 +35,17 @@ class MAC:
 
     def update_header(self, header_ciphertext: bytes) -> bytes:
         aes = Cipher(CIPHER(self.secret), MODE(),
-                     default_backend()).encryptor()
+                     backends.default_backend()).encryptor()
         header_mac_seed = xor(
             aes.update(self.digest()[:16]), header_ciphertext
         )
         self.update(header_mac_seed)
         return self.digest()[:16]
 
-    def update_body(self, frame_ciphertext: bytes) -> None:
+    def update_body(self, frame_ciphertext: bytes) -> bytes:
         self.update(frame_ciphertext)
         aes = Cipher(CIPHER(self.secret), MODE(),
-                     default_backend()).encryptor()
+                     backends.default_backend()).encryptor()
         prev = self.digest()[:16]
         frame_mac_seed = xor(aes.update(prev), prev)
         self.update(frame_mac_seed)
